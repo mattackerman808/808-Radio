@@ -1,0 +1,18 @@
+# Build output
+bin/
+obj/
+/dist/
+/native/
+/nrsc5/build/
+/rtl-sdr/build/
+
+# Recordings and test data
+*.cu8
+*.cf32
+*.wav
+*.log
+
+# Editors
+.vs/
+.vscode/
+*.user

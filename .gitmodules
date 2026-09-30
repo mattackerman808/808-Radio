@@ -1,0 +1,6 @@
+[submodule "nrsc5"]
+	path = nrsc5
+	url = https://github.com/theori-io/nrsc5.git
+[submodule "rtl-sdr"]
+	path = rtl-sdr
+	url = https://gitea.osmocom.org/sdr/rtl-sdr.git
