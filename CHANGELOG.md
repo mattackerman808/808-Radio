@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- **HD WEAK** on the display (and "HD too weak to play" in the instrument panel) when a station's HD is found, with
-  its name and program list, but its bit error rate is too high for the audio to decode, so you're hearing the analog.
+- **HD WEAK** on the display (Sync "weak" and "HD too weak to play" in the instrument panel) when a station's HD is
+  found, with its name and program list, but its bit error rate is too high for the audio to decode, so you're
+  hearing the analog.
   Before, the HD badge and HD1/HD2/HD3 suggested HD was playing.
 
 ## 0.3.0 (2026-10-01)

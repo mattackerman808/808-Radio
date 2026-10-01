@@ -624,7 +624,9 @@ internal sealed class NerdPanel : IDisposable
             L("Type", rds.PtyName is { Length: > 0 } pty ? $"{pty}{(rds.TrafficProgram ? "  TP" : "")}" : "—");
             L("Groups", rds.Synced ? $"{_groupsPerSec:0.0}/s  BLER {rds.BlockErrorRate:P0}" : "no sync");
             H("HD RADIO");
-            L("Sync", !hd.Synced ? "no" : hd.MerLower <= 0 && hd.MerUpper <= 0 ? "yes  MER measuring…" : $"yes  MER {hd.MerLower:0.0} / {hd.MerUpper:0.0} dB");
+            // "weak": locked on (name, programs) but too many bit errors for the audio
+            string sync = !hd.Synced ? "no" : eng.HdTooWeak ? "weak" : "yes";
+            L("Sync", !hd.Synced ? "no" : hd.MerLower <= 0 && hd.MerUpper <= 0 ? $"{sync}  MER measuring…" : $"{sync}  MER {hd.MerLower:0.0} / {hd.MerUpper:0.0} dB");
             L("BER", hd.Synced ? $"{hd.Ber:0.00000}" : "—");
             L("Programs", hd.Programs.Count == 0 ? "—" : string.Join(" ", hd.Programs.Select(kv => $"HD{kv.Key + 1}{(kv.Key == eng.Program ? "*" : "")}")));
             L("Blend", eng.HdTooWeak ? "analog · HD too weak to play"
