@@ -22,6 +22,7 @@ internal sealed class FaceplateView : Control
 {
     private const float W = 1000, ClosedH = 300, OpenH = 570;
     private const int MainCells = 13;
+    private const int Line2Cells = 26;   // the small dot-matrix line, full width (to the art square)
     private float H => _open || _anim > 0 ? OpenH : ClosedH;
 
     // flip-down faceplate: _anim 0 = closed, 1 = fully open
@@ -674,45 +675,43 @@ internal sealed class FaceplateView : Control
         DotMatrix.Draw(g, _mainCols, _scrollChars * DotMatrix.CellCols, 292, 76, 6.3f, MainCells, alert ? Alert : lit, ghost);
         if (eng == null && !_c.Starting) _hits.Add(new Hit(new RectangleF(284, 64, 500, 64), "start", () => _ = _c.StartAsync()));
 
-        // line 2: band + frequency, indicators, signal, clock
+        // line 2: a full-width small dot-matrix line: band + frequency on the left ("HD2 107.7"), the clock on the right
         string band = playingHd && eng != null ? $"HD{eng.Program + 1}" : "FM";
-        var l2 = DotMatrix.Columns($"{band,-4}{mhz,5}");
-        DotMatrix.Draw(g, l2, 0, 292, 140, 3.1f, 9, lit, ghost, glow: false);
-        float x = 470;
-        x = Indicator(g, x, 138, "HD", synced, playingHd, lit);
-        // status lights are filled when on (HD alone also has an outlined "detected, not playing yet" state)
-        x = Indicator(g, x, 138, "DGTL", playingHd, playingHd, lit);
-        bool stereo = eng != null && (playingHd || eng.Receiver.Stereo.PilotLocked && eng.Receiver.Stereo.Blend > 0.5f);
-        x = Indicator(g, x, 138, "ST", stereo, stereo, lit);
-        bool rdsOn = rds?.Synced == true;
-        x = Indicator(g, x, 138, "RDS", rdsOn, rdsOn, lit);
-        int preset = _c.Settings.Presets.FindIndex(p => p != null && Math.Abs(p.Mhz * 1e6 - freq) < 50_000);
-        if (preset >= 0) x = Indicator(g, x, 138, $"P{preset + 1}", true, true, lit);
-        // signal bars
-        int bars = eng == null ? 0 : Math.Clamp((int)Math.Round((eng.Receiver.ChannelPowerDb + 52) / 8), 0, 5);
-        for (int i = 0; i < 5; i++)
-        {
-            float bh = 4 + i * 3;
-            using var b = new SolidBrush(i < bars ? lit : ghost);
-            g.FillRectangle(b, 664 + i * 6, 160 - bh, 4, bh);
-        }
-        var clock = DotMatrix.Columns(DateTime.Now.ToString("H:mm").PadLeft(5));
-        DotMatrix.Draw(g, clock, 0, 700, 140, 3.1f, 5, lit, ghost, glow: false);   // ends at ~790, left of the art square
+        string left = $"{band,-4}{mhz,5}", clockText = DateTime.Now.ToString("H:mm").PadLeft(5);
+        var l2 = DotMatrix.Columns(left + new string(' ', Line2Cells - left.Length - clockText.Length) + clockText);
+        DotMatrix.Draw(g, l2, 0, 292, 136, 3.1f, Line2Cells, lit, ghost, glow: false);   // ends ~776, left of the art square
 
-        // line 3: fixed legends, printed on the glass like a real head unit's display; each is either lit or dark and
-        // nothing moves. (The HD program is on the dot-matrix line above, "HD2 107.7", and BAND steps through them.)
-        x = 292;
+        // line 3: the status lights, fixed legends printed on the glass like a real head unit's display: each is either
+        // lit or dark, and nothing moves. Signal bars at the right end.
+        float x = 292;
+        x = Indicator(g, x, 172, "HD", synced, playingHd, lit);   // outlined: found; filled: playing
+        // WEAK, right after HD so it reads "HD WEAK": HD found (name, programs) but the signal is too poor to play its
+        // audio, or it's holding off after dropouts until the signal is steady again
+        bool weak = eng != null && !_c.Settings.ForceAnalog && (eng.HdTooWeak || synced && !playingHd && eng.Blender.RetryIn > 0.5);
+        x = Indicator(g, x, 172, "WEAK", weak, false, lit);
+        x = Indicator(g, x, 172, "DGTL", playingHd, playingHd, lit);
+        bool stereo = eng != null && (playingHd || eng.Receiver.Stereo.PilotLocked && eng.Receiver.Stereo.Blend > 0.5f);
+        x = Indicator(g, x, 172, "ST", stereo, stereo, lit);
+        bool rdsOn = rds?.Synced == true;
+        x = Indicator(g, x, 172, "RDS", rdsOn, rdsOn, lit) + 8;
         bool wx = hd?.WeatherMap != null, trf = hd != null && hd.TrafficTiles.Any(t => t != null);
         float wxEnd = Indicator(g, x, 172, "WX", wx, false, lit);
         if (wx) _hits.Add(new Hit(new RectangleF(x - 2, 168, wxEnd - x, 22), "wx", () => MapRequested?.Invoke("weather")));
         x = wxEnd;
         float trfEnd = Indicator(g, x, 172, "TRF", trf, false, lit);
         if (trf) _hits.Add(new Hit(new RectangleF(x - 2, 168, trfEnd - x, 22), "trf", () => MapRequested?.Invoke("traffic")));
-        x = trfEnd + 6;
-        x = Indicator(g, x, 172, "SEEK", _c.Seeking, _c.Seeking, lit);
-        // WEAK: HD found (name, programs) but too weak to play, or holding off after dropouts until it's steady again
-        bool weak = eng != null && !_c.Settings.ForceAnalog && (eng.HdTooWeak || synced && !playingHd && eng.Blender.RetryIn > 0.5);
-        Indicator(g, x, 172, "WEAK", weak, false, lit);
+        x = Indicator(g, trfEnd, 172, "SEEK", _c.Seeking, _c.Seeking, lit);
+        // preset slot: lit "P3" on a preset station, an unlit "P–" otherwise (a fixed spot, like a VFD's digit)
+        int preset = _c.Settings.Presets.FindIndex(p => p != null && Math.Abs(p.Mhz * 1e6 - freq) < 50_000);
+        Indicator(g, x, 172, preset >= 0 ? $"P{preset + 1}" : "P–", preset >= 0, preset >= 0, lit);
+        // signal bars, right-aligned under the clock
+        int bars = eng == null ? 0 : Math.Clamp((int)Math.Round((eng.Receiver.ChannelPowerDb + 52) / 8), 0, 5);
+        for (int i = 0; i < 5; i++)
+        {
+            float bh = 4 + i * 3;
+            using var b = new SolidBrush(i < bars ? lit : ghost);
+            g.FillRectangle(b, 748 + i * 6, 187 - bh, 4, bh);
+        }
 
         // art square: album art / station logo (click to enlarge), else the audio spectrum analyzer
         var sq = AnalyzerArea;

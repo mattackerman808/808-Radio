@@ -2,12 +2,13 @@
 
 ## Unreleased
 
-- **Display reworked like a real head unit's:** the bottom row is fixed legends, lit or dark: **WX**, **TRF**,
-  **SEEK** and **WEAK**. The HD1/HD2/… tags that came and went are gone; the HD program you hear is on the dot-matrix
-  line (`HD2 107.7`), and **BAND** steps through the programs (`HD2/3 CLASSIC ROCK`). The "HD IN 12S" countdown text is
-  folded into **WEAK**.
-- **WEAK** lights (and the instrument panel shows Sync "weak", Blend "HD too weak to play") when a station's HD is
-  found, with its name and program list, but its bit error rate is too high for the audio to decode, so you're
+- **Display reworked like a real head unit's:** a large dot-matrix line; a full-width small one with the band and
+  frequency (`FM 107.7`, or the HD program you're hearing, `HD2 107.7`) and the clock; and a row of fixed status
+  lights, each lit or dark, nothing moving: **HD WEAK DGTL ST RDS · WX TRF SEEK P1–P6**, then the signal bars. The
+  HD1/HD2/… tags that came and went are gone; **BAND** steps through the HD programs (`HD2/3 CLASSIC ROCK`). The
+  "HD IN 12S" countdown text is folded into **WEAK**.
+- **HD WEAK** lights (and the instrument panel shows Sync "weak", Blend "HD too weak to play") when a station's HD
+  is found, with its name and program list, but its bit error rate is too high for the audio to decode, so you're
   hearing the analog. Before, the HD badge and program tags suggested HD was playing.
 - **Network dongle recovers from a wedged rtl_tcp.** rtl_tcp can hang when a client disconnects (half-closed socket,
   a spinning CPU, sometimes a stuck dongle). The Pi setup now installs `rtl-tcp-watchdog.service`, which restarts

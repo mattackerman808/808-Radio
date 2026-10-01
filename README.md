@@ -52,11 +52,13 @@ anywhere, though the tuning grid, de-emphasis and program types are US defaults 
 | **▲** | flip the faceplate down to the instrument panel (O) |
 | **Right-click** | source (USB or network dongle), gain, frequency correction, antenna power (bias-tee), album art, panel frame rate, always on top, … |
 
-Drag the faceplate to move it; drag its edges to resize. The display shows **HD** (outlined: HD found; filled: playing
-HD), **DGTL** (you're hearing the digital audio), **ST** (stereo), **RDS**, and **P1–P6** when on a preset; the
-frequency line shows the HD program you're hearing (`HD2 97.3`, choose with **BAND**). The bottom row lights **WX** /
-**TRF** (weather / traffic map available: click it), **SEEK**, and **WEAK**: HD found, with its station name and
-programs, but too weak to play its audio, so you hear the analog. The slot on the right is the signal-quality meter (HD MER when HD is locked); it turns red with **OVL** if the dongle overloads.
+Drag the faceplate to move it; drag its edges to resize. The display has a large dot-matrix line (now playing, station
+name or frequency), a small one with the band and frequency (`FM 97.3`, or the HD program you're hearing, `HD2 97.3`:
+choose with **BAND**) and the clock, and a row of fixed status lights: **HD** (outlined: found; filled: playing),
+**WEAK** (HD found, with its station name and programs, but the signal is too poor to play its audio, so you hear the
+analog), **DGTL** (you're hearing the digital audio), **ST** (stereo), **RDS**, **WX** / **TRF** (weather / traffic map
+available: click it), **SEEK**, **P1–P6** (on a preset), and the signal bars. The slot on the right of the faceplate is
+the signal-quality meter (HD MER when HD is locked); it turns red with **OVL** if the dongle overloads.
 The square at the right of the display shows the HD album art or station logo (click it for a bigger picture with the
 song and station), or else an old-school audio spectrum analyzer; right-click → *Album art on the display* to always
 have the analyzer.
