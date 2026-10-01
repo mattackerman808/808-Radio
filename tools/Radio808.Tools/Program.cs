@@ -23,7 +23,12 @@ internal static class Program
                 case "capture": return Capture(Mhz(args, 1, 97.3), double.Parse(args[2]), args[3], args.Length > 4 ? double.Parse(args[4]) : null);
                 case "spectrum": return Spectrum(args[1]);
                 case "scan": return Scan(args.Length > 1 ? double.Parse(args[1]) : double.NaN);
-                case "fm": return FmTools.Offline(args[1], args[2]);
+                case "fm": return FmTools.Offline(args[1], args[2], args.Length > 3 ? int.Parse(args[3]) : 48_000);
+                case "snr": return AudioCompare.Snr(args[1], args[2]);
+                case "gaintest": return FmTools.GainTest(Mhz(args, 1, 97.3));
+                case "selftest": return SelfTest.Run(args.Length > 1 ? double.Parse(args[1]) : 999,
+                    args.Length > 2 ? double.Parse(args[2]) : 0, args.Length > 3 ? double.Parse(args[3]) : 0);
+                case "compare": return AudioCompare.Run(args[1..]);
                 case "play": return FmTools.Play(Mhz(args, 1, 97.3), args.Length > 2 ? double.Parse(args[2]) : 16.6, args.Length > 3 ? double.Parse(args[3]) : 0);
                 default:
                     Console.WriteLine("usage: tools devices | probe <MHz> [s] | capture <MHz> <s> <out.cu8> [gain] | spectrum <in.cu8> | scan [gain]");

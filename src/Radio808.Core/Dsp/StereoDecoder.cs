@@ -44,7 +44,9 @@ public sealed class StereoDecoder
         // Phase detector lowpass: 3 poles at 150 Hz, ~85 dB down 4 kHz away, where 15 kHz audio and the
         // 23 kHz L-R band would otherwise leak in.
         _lpA = (float)(1 - Math.Exp(-2 * Math.PI * 150 / mpxRate));
-        _deA = (float)(1 - Math.Exp(-1 / (mpxRate / Decimation * deemphasisUs * 1e-6)));
+        // De-emphasis runs at the MPX rate on L+R and L-R (before decimation): a one-pole filter there tracks the
+        // analog 1/(1 + j w tau) within 0.1 dB to 15 kHz; at the 46.5 kHz audio rate it read +1.4 dB high at 15 kHz.
+        _deA = (float)(1 - Math.Exp(-1 / (mpxRate * deemphasisUs * 1e-6)));
     }
 
     public double OutputRate => _fs / Decimation;
@@ -68,6 +70,7 @@ public sealed class StereoDecoder
         if (_m.Length < n) { _m = new float[n]; _s = new float[n]; }
         double theta = _theta, omega = _omega;
         float pi = _pi, pq = _pq, pi1 = _pi1, pq1 = _pq1, pi2 = _pi2, pq2 = _pq2, a = _lpA;
+        float dm = _deL, ds = _deR, da = _deA;   // de-emphasis state for L+R and L-R
         for (int k = 0; k < n; k++)
         {
             float x = mpx[k];
@@ -81,12 +84,17 @@ public sealed class StereoDecoder
             else if (omega < _omega0 - _omegaLimit) omega = _omega0 - _omegaLimit;
             theta += omega + _kp * err;
             if (theta > Math.PI) theta -= 2 * Math.PI;
-            _m[k] = x;
             // The pilot is sin(wt) and the subcarrier sin(2wt). The PLL locks theta to the pilot's cosine phase,
             // theta = wt - pi/2, so sin(2wt) = -sin(2 theta) = -2 sin(theta) cos(theta).
-            _s[k] = x * -4 * s * c;
+            // (De-emphasizing L-R here, before its lowpass, also de-emphasizes the 38 kHz products; the audio
+            // filter removes those.)
+            dm += da * (x - dm);
+            ds += da * (x * -4 * s * c - ds);
+            _m[k] = dm;
+            _s[k] = ds;
         }
         _theta = theta; _omega = omega; _pi = pi; _pq = pq; _pi1 = pi1; _pq1 = pq1; _pi2 = pi2; _pq2 = pq2;
+        _deL = dm; _deR = ds;
 
         // lock and noise tracking, once per block
         float amp = PilotLevel;
@@ -104,17 +112,14 @@ public sealed class StereoDecoder
         float target = 0;
         if (!ForceMono && PilotLocked) target = Math.Clamp((PilotSnrDb - 18f) / 14f, 0f, 1f);
         float blend = _blend, step = 1f / (float)(OutputRate * 0.4);
-        float dl = _deL, dr = _deR, da = _deA;
         for (int k = 0; k < frames; k++)
         {
             blend += Math.Clamp(target - blend, -step, step);
             float m = _mOut[k], d = _sOut[k] * blend;
-            dl += da * (m + d - dl);
-            dr += da * (m - d - dr);
-            stereo[2 * k] = dl;
-            stereo[2 * k + 1] = dr;
+            stereo[2 * k] = m + d;
+            stereo[2 * k + 1] = m - d;
         }
-        _blend = blend; _deL = dl; _deR = dr;
+        _blend = blend;
         return frames;
     }
 
