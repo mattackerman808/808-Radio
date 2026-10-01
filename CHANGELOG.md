@@ -16,7 +16,10 @@
   too weak to play), with an antenna icon under it. The small signal bars on the display, which duplicated it, are
   gone. DISP and HD CH swapped places (DISP on the left).
 - The audio analyzer brightens toward the top for depth (one color, the illumination), with brighter peak ticks.
-- The clock is a seven-segment readout, like a VFD clock, at the end of the small line.
+- Seven-segment readouts: the clock at the end of the small line, like a VFD clock, and each preset key's frequency
+  in a little window (lit on the preset you're on, dimmer on the others, ghost 88.8 on an empty one).
+- The HD mini matrix scrolls the station's programs with their formats (`HD1 ADULT HITS  HD2 TOP 40`); click it for the
+  next program.
 - **WEAK** lights next to **HD** (and the instrument panel shows Sync "weak", Blend "HD too weak to play") when a station's HD
   is found, with its name and program list, but its bit error rate is too high for the audio to decode, so you're
   hearing the analog. Before, the HD badge and program tags suggested HD was playing.

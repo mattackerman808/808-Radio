@@ -34,6 +34,12 @@ internal static class SevenSegment
                 x += h * 0.24f;
                 continue;
             }
+            if (ch == '.')   // decimal point: in the gap after the previous digit, on the baseline
+            {
+                float r = h * 0.07f;
+                g.FillEllipse(onB, x - gap / 2 - r + Lean(h - r, h), y + h - 2 * r, 2 * r, 2 * r);
+                continue;
+            }
             int mask = ch is >= '0' and <= '9' ? Digits[ch - '0'] : 0;
             for (int s = 0; s < 7; s++)
             {

@@ -74,6 +74,10 @@ internal sealed class FaceplateView : Control
     private string? _subText;
     private List<bool[]> _subCols = new();
     private int _subScroll, _subTicks, _subCells = 10;
+    // the HD programs mini matrix, scrolled the same way
+    private const int HdCells = 13;
+    private string? _hdText;
+    private int _hdScroll, _hdTicks, _hdLen;
     private string? _flash;
     private DateTime _flashUntil;
 
@@ -315,6 +319,7 @@ internal sealed class FaceplateView : Control
         // around again
         Marquee(_mainCols.Count / DotMatrix.CellCols, MainCells, ref _scrollChars, ref _scrollTicks);
         Marquee(_subCols.Count / DotMatrix.CellCols, _subCells, ref _subScroll, ref _subTicks);
+        Marquee(_hdLen, HdCells, ref _hdScroll, ref _hdTicks);
         Invalidate();
     }
 
@@ -724,39 +729,39 @@ internal sealed class FaceplateView : Control
         float trfEnd = Indicator(g, x, 172, "TRAFFIC", trf, false, lit);
         if (trf) _hits.Add(new Hit(new RectangleF(x - 2, 168, trfEnd - x, 22), "trf", () => MapRequested?.Invoke("traffic")));
 
-        // a mini dot matrix after the lights, always there (unlit without HD): the station's HD programs, "HD 1 2 3".
-        // The one you're hearing fully lit; the one you've chosen blinks while it locks in (switching programs, or HD
-        // coming back); the rest dimmer. All dimmer when HD is too weak to play (WEAK says why). Click a number.
+        // a mini dot matrix after the lights, always there (unlit without HD): the station's HD programs with their
+        // formats, scrolling when they don't fit ("HD1 CLASSIC ROCK   HD2 ADULT HITS"). The one you're hearing lit; the
+        // one you've chosen blinks while it locks in (switching programs, or HD coming back); the rest dimmer, and all
+        // dimmer when HD is too weak to play (WEAK says why). Click it for the next program.
         {
             const float pitch = 2.2f, cellW = pitch * DotMatrix.CellCols;
-            const int cells = 13;
             float mx = trfEnd + 14, my = 171;
-            DotMatrix.Draw(g, DotMatrix.Columns(""), 0, mx, my, pitch, cells, lit, ghost, glow: false);
+            DotMatrix.Draw(g, DotMatrix.Columns(""), 0, mx, my, pitch, HdCells, lit, ghost, glow: false);
             if (hd != null && synced && hd.Programs.Count > 0 && eng != null)
             {
                 var dim = Color.FromArgb(110, lit);
                 bool tooWeak = eng.HdTooWeak, blinkOn = DateTime.UtcNow.Millisecond < 500;
-                var progs = hd.Programs.Keys.ToList();
-                int cell = 0;
-                void Cell(string ch, Color c) => DotMatrix.Draw(g, DotMatrix.Columns(ch), 0, mx + cell * cellW, my, pitch, 1, c, ghost, glow: false);
-                Cell("H", playingHd ? lit : dim); cell++;
-                Cell("D", playingHd ? lit : dim); cell += 2;
-                bool spaced = progs.Count <= 4;
-                foreach (uint p in progs)
+                // the text, one color per character
+                var chars = new List<(char ch, Color c)>();
+                foreach (var (p, type) in hd.Programs)
                 {
-                    if (cell >= cells) break;
-                    uint prog = p;
                     bool chosen = p == eng.Program;
                     var c = !chosen ? dim : playingHd ? lit : !tooWeak && !_c.Settings.ForceAnalog && blinkOn ? lit : dim;
-                    Cell(((p + 1) % 10).ToString(), c);
-                    _hits.Add(new Hit(new RectangleF(mx + cell * cellW - 3, 166, cellW + 4, 26), "prog" + p, () =>
-                    {
-                        _c.SetProgram(prog);
-                        Flash($"HD{prog + 1}/{progs.Count}");
-                    }));
-                    cell += spaced ? 2 : 1;
+                    if (chars.Count > 0) chars.AddRange("  ".Select(ch => (ch, c)));
+                    chars.AddRange($"HD{p + 1}{(string.IsNullOrWhiteSpace(type) ? "" : " " + type.ToUpperInvariant())}".Select(ch => (ch, c)));
                 }
+                string plain = new(chars.Select(t => t.ch).ToArray());
+                if (plain != _hdText) { _hdText = plain; _hdScroll = _hdTicks = 0; }
+                _hdLen = chars.Count;
+                for (int i = 0; i < HdCells; i++)
+                {
+                    int k = i + _hdScroll;
+                    if (k >= chars.Count) break;
+                    DotMatrix.Draw(g, DotMatrix.Columns(chars[k].ch.ToString()), 0, mx + i * cellW, my, pitch, 1, chars[k].c, ghost, glow: false);
+                }
+                _hits.Add(new Hit(new RectangleF(mx - 3, 166, HdCells * cellW + 6, 26), "hdlist", NextProgram));
             }
+            else _hdLen = 0;
         }
 
         // art square: album art / station logo (click to enlarge), else the audio spectrum analyzer
@@ -967,7 +972,16 @@ internal sealed class FaceplateView : Control
                 _c.RecallPreset(idx);
             }, lit: current, hold: () => { StorePreset(idx); Flash($"P{idx + 1} SAVED"); });
             Label(g, (i + 1).ToString(), 15, lit, new RectangleF(r.X + 8, r.Y, 20, h), StringAlignment.Near, bold: true);
-            if (p != null) Label(g, p.Mhz.ToString("0.0"), 10.5f, current ? lit : Grey, new RectangleF(r.X + 26, r.Y, r.Width - 32, h), StringAlignment.Far);
+            // the frequency on a little seven-segment window: lit on the preset you're on, dimmer on the others, all
+            // ghost 8s on an empty one
+            var win = new RectangleF(r.Right - 52, r.Y + 6, 46, h - 12);
+            using (var wp = Rounded(win, 3))
+            using (var wb = new SolidBrush(Color.FromArgb(0x04, 0x06, 0x08))) g.FillPath(wb, wp);
+            const float segH = 12;
+            string digits = p == null ? "    " : p.Mhz.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture).PadLeft(5);
+            float digitsW = 4 * SevenSegment.DigitWidth(segH) + 3 * segH * 0.16f;
+            SevenSegment.Draw(g, digits, win.Right - 5 - digitsW, win.Y + (win.Height - segH) / 2, segH,
+                current ? lit : Color.FromArgb(150, lit), Color.FromArgb(22, lit));
         }
     }
 
