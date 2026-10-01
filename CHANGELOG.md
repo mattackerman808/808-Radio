@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-01)
 
 - **Network dongle**: use an RTL-SDR on another machine (e.g. a Raspberry Pi by the antenna) through the standard
   `rtl_tcp` server: right-click → Source → Network dongle. Gain, frequency correction and antenna power work over the
