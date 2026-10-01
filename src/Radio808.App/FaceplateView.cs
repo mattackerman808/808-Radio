@@ -27,6 +27,8 @@ internal sealed class FaceplateView : Control
     private bool _open;
     private float _anim;
     private readonly Timer _animTimer = new() { Interval = 15 };
+    private readonly Timer _fastPaint = new() { Interval = 16 };   // smooth repaints while the spectrum slides
+    private Point? _hoverHiddenAt;
     private readonly NerdPanel _nerd;
 
     /// <summary>Raised before opening (true) and after closing (false): the window should change height.</summary>
@@ -114,6 +116,13 @@ internal sealed class FaceplateView : Control
             Invalidate();
         };
         _nerd = new NerdPanel(c);
+        _fastPaint.Tick += (_, _) =>
+        {
+            Invalidate();
+            if (!_nerd.Animating) _fastPaint.Stop();
+        };
+        // any retune (keys, presets, seek) slides the open spectrum too
+        c.Changed += () => { if (_open) _fastPaint.Start(); };
         _animTimer.Tick += (_, _) =>
         {
             float step = 15f / 380f;
@@ -772,6 +781,8 @@ internal sealed class FaceplateView : Control
             return;
         }
         var h = HitAt(p)?.Id;
+        if (_hoverHiddenAt is Point hp && Math.Abs(e.X - hp.X) + Math.Abs(e.Y - hp.Y) < 4) return;   // not moved since the click
+        _hoverHiddenAt = null;
         float? hx = h == "tune" ? p.X : null;
         if (hx != _nerd.HoverX) { _nerd.HoverX = hx; Invalidate(); }
         if (h != _hover)
@@ -824,7 +835,16 @@ internal sealed class FaceplateView : Control
             var h = HitAt(p);
             if (h != null && h.Id == _pressed)
             {
-                if (h.Id == "tune") _c.Tune(_nerd.FrequencyAt(p.X));
+                if (h.Id == "tune")
+                {
+                    long hz = _nerd.FrequencyAt(p.X);
+                    _nerd.BeginTune(hz);
+                    _c.Tune(hz);
+                    // the highlight now travels with the station; hide the hover until the mouse moves
+                    _nerd.HoverX = null;
+                    _hoverHiddenAt = e.Location;
+                    _fastPaint.Start();
+                }
                 else h.Click?.Invoke();
             }
         }

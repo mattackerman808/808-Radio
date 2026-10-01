@@ -54,8 +54,8 @@ internal sealed class NerdPanel : IDisposable
 
     private void AddRow(float[] db)
     {
-        long f = _c.Frequency;
-        if (f != _rowCenter) { _rowCenter = f; ClearWaterfall(); }   // retuned: old rows no longer line up
+        CheckRetune();
+        if (DateTime.UtcNow < _ignoreRowsUntil) return;   // samples still in flight from the old frequency
         int per = db.Length / SpecW;
         var row = new float[SpecW];
         for (int c = 0; c < SpecW; c++)
@@ -170,9 +170,13 @@ internal sealed class NerdPanel : IDisposable
 
     private void DrawBaseband(Graphics g, float x, float y, Color lit)
     {
+        CheckRetune();
         long f = _c.Frequency;
         double half = HalfSpanKhz;
-        Title(g, x, y, $"SPECTRUM  ·  {f / 1e6:0.0} MHz  ·  click to tune, wheel to step", lit);
+        var eng = _c.Engine;
+        bool hdSynced = eng?.Hd.Synced == true, hdPlaying = eng?.Blender.PlayingHd == true;
+        var orange = Color.FromArgb(0xF7, 0x94, 0x1D);
+        Title(g, x, y, $"SPECTRUM  \u00B7  {f / 1e6:0.0} MHz  \u00B7  click a station to tune, wheel to step", lit);
         // span toggle, right-aligned on the title line
         float rEdge = x + SpecW;
         SpanToggle = new RectangleF(rEdge - 140, y - 2, 140, 16);
@@ -181,21 +185,32 @@ internal sealed class NerdPanel : IDisposable
         Small(g, "1.5 MHz", rEdge - 104, y + 1, 44, Wide ? lit : dim, StringAlignment.Near);
         Small(g, "|", rEdge - 56, y + 1, 8, dim, StringAlignment.Near);
         Small(g, "744 kHz", rEdge - 44, y + 1, 44, Wide ? dim : lit, StringAlignment.Near);
+
         var sr = new RectangleF(x, y + 18, SpecW, 100);
+        var wr = new RectangleF(x, sr.Bottom + 1, SpecW, WaterH);
         Frame(g, sr);
         TuneArea = new RectangleF(x, sr.Y, SpecW, sr.Height + 1 + WaterH);
         _tuneX0 = x;
+
+        // Everything inside the spectrum/waterfall (and the axis under it) is drawn in the new center's
+        // coordinates, shifted by the slide offset, which eases to 0 after a retune.
+        float pan = Pan;
+        var outer = g.Save();
+        g.SetClip(new RectangleF(x, sr.Y, SpecW, sr.Height + 1 + WaterH + 16));
+        g.TranslateTransform(pan, 0);
         float Px(double khz) => (float)(sr.X + (khz + half) / (2 * half) * SpecW);
-        // the current station's HD sidebands
-        using (var hdB = new SolidBrush(Color.FromArgb(26, 0xF7, 0x94, 0x1D)))
-        {
-            g.FillRectangle(hdB, Px(-198), sr.Y, Px(-129) - Px(-198), sr.Height);
-            g.FillRectangle(hdB, Px(129), sr.Y, Px(198) - Px(129), sr.Height);
-        }
-        // channel grid (US: odd tenths, 200 kHz apart)
+
+        // the current station's HD sidebands: only while HD is decoding, brighter while it's what you hear
+        if (hdSynced)
+            using (var hdB = new SolidBrush(Color.FromArgb(hdPlaying ? 48 : 24, orange)))
+            {
+                g.FillRectangle(hdB, Px(-198), sr.Y, Px(-129) - Px(-198), sr.Height);
+                g.FillRectangle(hdB, Px(129), sr.Y, Px(198) - Px(129), sr.Height);
+            }
+        // channel grid (US: odd tenths, 200 kHz apart), one span beyond each edge so the slide never shows a gap
         var channels = new List<(long hz, float px)>();
-        long firstCh = Snap(f - (long)(half * 1000) + RadioEngine.ChannelStep / 2);
-        for (long ch = firstCh; ch <= f + half * 1000; ch += RadioEngine.ChannelStep)
+        long firstCh = Snap(f - (long)(2 * half * 1000));
+        for (long ch = firstCh; ch <= f + 2 * half * 1000; ch += RadioEngine.ChannelStep)
             channels.Add((ch, Px((ch - f) / 1000.0)));
         using (var grid = new Pen(Color.FromArgb(30, lit), 1) { DashStyle = DashStyle.Dot })
             foreach (var (_, px) in channels) g.DrawLine(grid, px, sr.Y, px, sr.Bottom);
@@ -210,37 +225,69 @@ internal sealed class NerdPanel : IDisposable
             using (var pen = new Pen(lit, 1.2f)) g.DrawLines(pen, pts);
         }
         // waterfall: newest row at the top
-        var wr = new RectangleF(x, sr.Bottom + 1, SpecW, WaterH);
         int newest = (_waterRow - 1 + WaterH) % WaterH;
         var state = g.Save();
         g.InterpolationMode = InterpolationMode.NearestNeighbor;
         g.PixelOffsetMode = PixelOffsetMode.Half;
-        // rows newest..0 then WaterH-1..newest+1, drawn top-down
         int topRows = newest + 1;
         DrawFlipped(g, new Rectangle(0, 0, SpecW, topRows), wr.X, wr.Y);
         if (topRows < WaterH) DrawFlipped(g, new Rectangle(0, topRows, SpecW, WaterH - topRows), wr.X, wr.Y + topRows);
         g.Restore(state);
-        Frame(g, wr, fill: false);
         // axis: channel frequencies, the tuned one brighter
         foreach (var (hz, px) in channels)
-            Small(g, (hz / 1e6).ToString("0.0"), px - 18, wr.Bottom + 1, 36, hz == Snap(f) ? lit : Color.FromArgb(140, lit), StringAlignment.Center);
-        Small(g, "HD", Px(-163) - 10, sr.Y + 2, 20, Color.FromArgb(200, 0xF7, 0x94, 0x1D), StringAlignment.Center);
-        Small(g, "HD", Px(163) - 10, sr.Y + 2, 20, Color.FromArgb(200, 0xF7, 0x94, 0x1D), StringAlignment.Center);
-
+            Small(g, (hz / 1e6).ToString("0.0"), px - 18, wr.Bottom + 1, 36, hz == Snap(f) ? orange : Color.FromArgb(140, lit), StringAlignment.Center);
+        if (hdSynced)
+        {
+            Small(g, "HD", Px(-163) - 10, sr.Y + 2, 20, orange, StringAlignment.Center);
+            Small(g, "HD", Px(163) - 10, sr.Y + 2, 20, orange, StringAlignment.Center);
+        }
         // tuned station marker
-        using (var tuned = new Pen(Color.FromArgb(150, 0xF7, 0x94, 0x1D), 1.2f)) g.DrawLine(tuned, Px(0), sr.Y, Px(0), wr.Bottom);
+        using (var tuned = new Pen(Color.FromArgb(170, orange), 1.4f)) g.DrawLine(tuned, Px(0), sr.Y, Px(0), wr.Bottom);
+        // the clicked channel travels to the center with its highlight
+        if (_pending is long pend)
+        {
+            float a = Px((pend - f) / 1000.0 - 100), b = Px((pend - f) / 1000.0 + 100);
+            using var hb = new SolidBrush(Color.FromArgb(55, lit));
+            g.FillRectangle(hb, a, sr.Y, b - a, sr.Height + 1 + WaterH);
+        }
+        g.Restore(outer);
+        Frame(g, wr, fill: false);
 
-        // hover: the channel under the mouse, shaded, with its frequency
-        if (HoverX is float hx && hx >= sr.X && hx <= sr.Right)
+        // hover (only when not mid-slide): the channel under the mouse, shaded, with its frequency
+        if (_pending == null && HoverX is float hx && hx >= sr.X && hx <= sr.Right)
         {
             long ch = FrequencyAt(hx);
             float a = Px((ch - f) / 1000.0 - 100), b = Px((ch - f) / 1000.0 + 100);
+            var hs = g.Save();
+            g.SetClip(TuneArea);
             using (var hb = new SolidBrush(Color.FromArgb(40, lit))) g.FillRectangle(hb, a, sr.Y, b - a, sr.Height + 1 + WaterH);
+            g.Restore(hs);
             using (var hp = new Pen(Color.FromArgb(200, lit), 1)) g.DrawLine(hp, hx, sr.Y, hx, wr.Bottom);
-            string label = $"{ch / 1e6:0.0} MHz";
-            float lx = Math.Clamp(hx + 6, sr.X + 2, sr.Right - 70);
-            using (var bg = new SolidBrush(Color.FromArgb(220, 0x03, 0x05, 0x06))) g.FillRectangle(bg, lx - 2, sr.Y + 16, 68, 15);
-            Small(g, label, lx, sr.Y + 17, 66, lit, StringAlignment.Near);
+            string label = ch == Snap(f) ? $"{ch / 1e6:0.0} MHz (tuned)" : $"{ch / 1e6:0.0} MHz  \u00B7  click to tune";
+            float w = 150, lx = Math.Clamp(hx + 6, sr.X + 2, sr.Right - w - 2);
+            using (var bg = new SolidBrush(Color.FromArgb(225, 0x03, 0x05, 0x06))) g.FillRectangle(bg, lx - 2, sr.Y + 16, w, 15);
+            Small(g, label, lx, sr.Y + 17, w - 4, lit, StringAlignment.Near);
+        }
+
+        // banner while tuning
+        if (DateTime.UtcNow < _bannerUntil)
+        {
+            string msg = $"TUNED  {f / 1e6:0.0} MHz";
+            using var bf = new Font("Segoe UI Semibold", 13, FontStyle.Regular, GraphicsUnit.Pixel);
+            float bw = g.MeasureString(msg, bf, PointF.Empty, StringFormat.GenericTypographic).Width + 24;
+            var br = new RectangleF(sr.X + (SpecW - bw) / 2, sr.Y + 6, bw, 22);
+            double age = (_bannerUntil - DateTime.UtcNow).TotalSeconds;
+            int alpha = (int)(255 * Math.Clamp(age / 0.4, 0, 1));   // fades out over the last 0.4 s
+            using (var bb = new SolidBrush(Color.FromArgb(alpha * 230 / 255, 0x03, 0x05, 0x06)))
+            using (var path = new GraphicsPath())
+            {
+                path.AddRectangle(br);
+                g.FillPath(bb, path);
+            }
+            using (var bp = new Pen(Color.FromArgb(alpha, orange), 1.2f)) g.DrawRectangle(bp, br.X, br.Y, br.Width, br.Height);
+            using var tb = new SolidBrush(Color.FromArgb(alpha, orange));
+            using var fmt = new StringFormat(StringFormat.GenericTypographic) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+            g.DrawString(msg, bf, tb, br, fmt);
         }
     }
 
@@ -266,7 +313,7 @@ internal sealed class NerdPanel : IDisposable
     /// <summary>The channel (US 200 kHz grid) at a design x position in the spectrum.</summary>
     public long FrequencyAt(float x)
     {
-        double khz = (x - _tuneX0) / SpecW * 2 * HalfSpanKhz - HalfSpanKhz;
+        double khz = (x - Pan - _tuneX0) / SpecW * 2 * HalfSpanKhz - HalfSpanKhz;
         return Snap(_c.Frequency + (long)(khz * 1000));
     }
 
@@ -274,6 +321,83 @@ internal sealed class NerdPanel : IDisposable
     {
         long k = (long)Math.Round((hz - RadioEngine.FirstChannel) / (double)RadioEngine.ChannelStep);
         return Math.Clamp(RadioEngine.FirstChannel + k * RadioEngine.ChannelStep, RadioEngine.FirstChannel, RadioEngine.LastChannel);
+    }
+
+    // ---- retune motion: the view slides so the new station glides into the center ----
+
+    private const double PanSeconds = 0.45;
+    private float _panFrom;               // design px the view starts offset by (eases to 0)
+    private DateTime _panStart = DateTime.MinValue, _ignoreRowsUntil = DateTime.MinValue, _bannerUntil = DateTime.MinValue;
+    private long? _pending;               // channel the user clicked; highlighted while it slides in
+
+    /// <summary>Current slide offset in design px (content drawn this far right of its true position).</summary>
+    private float Pan
+    {
+        get
+        {
+            double t = (DateTime.UtcNow - _panStart).TotalSeconds / PanSeconds;
+            if (t >= 1) { _pending = null; return 0; }
+            double e = 1 - Math.Pow(1 - t, 3);   // ease-out cubic
+            return (float)(_panFrom * (1 - e));
+        }
+    }
+
+    public bool Animating => (DateTime.UtcNow - _panStart).TotalSeconds < PanSeconds || DateTime.UtcNow < _bannerUntil;
+
+    /// <summary>The user clicked a channel: remember it so its highlight travels with the slide.</summary>
+    public void BeginTune(long hz) => _pending = hz;
+
+    /// <summary>Notices a frequency change and shifts the history so it lines up with the new center.</summary>
+    private void CheckRetune()
+    {
+        long f = _c.Frequency;
+        if (f == _rowCenter) return;
+        long delta = f - _rowCenter;
+        bool first = _rowCenter == 0;
+        _rowCenter = f;
+        if (first) return;
+        float px = (float)(delta / (2 * HalfSpanKhz * 1000) * SpecW);
+        if (Math.Abs(px) >= SpecW) ClearWaterfall();
+        else
+        {
+            int dx = -(int)Math.Round(px);   // tuning up moves the content left
+            ShiftWaterfall(dx);
+            ShiftSpectrum(dx);
+            _panFrom = px;                   // ...but start drawn where it was, then glide
+            _panStart = DateTime.UtcNow;
+        }
+        _ignoreRowsUntil = DateTime.UtcNow.AddSeconds(0.35);
+        _bannerUntil = DateTime.UtcNow.AddSeconds(1.4);
+    }
+
+    private void ShiftWaterfall(int dx)
+    {
+        var rect = new Rectangle(0, 0, SpecW, WaterH);
+        var data = _water.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppRgb);
+        var row = new int[SpecW];
+        var shifted = new int[SpecW];
+        for (int y = 0; y < WaterH; y++)
+        {
+            IntPtr p = data.Scan0 + y * data.Stride;
+            Marshal.Copy(p, row, 0, SpecW);
+            for (int x = 0; x < SpecW; x++)
+            {
+                int sx = x - dx;
+                shifted[x] = sx >= 0 && sx < SpecW ? row[sx] : 0;
+            }
+            Marshal.Copy(shifted, 0, p, SpecW);
+        }
+        _water.UnlockBits(data);
+    }
+
+    private void ShiftSpectrum(int dx)
+    {
+        var old = (float[])_spec.Clone();
+        for (int x = 0; x < SpecW; x++)
+        {
+            int sx = x - dx;
+            _spec[x] = sx >= 0 && sx < SpecW ? old[sx] : _wfFloor;
+        }
     }
 
     private void ClearWaterfall()
@@ -381,7 +505,7 @@ internal sealed class NerdPanel : IDisposable
             L("Type", rds.PtyName is { Length: > 0 } pty ? $"{pty}{(rds.TrafficProgram ? "  TP" : "")}" : "—");
             L("Groups", rds.Synced ? $"{_groupsPerSec:0.0}/s  BLER {rds.BlockErrorRate:P0}" : "no sync");
             H("HD RADIO");
-            L("Sync", hd.Synced ? $"yes  MER {hd.MerLower:0.0} / {hd.MerUpper:0.0} dB" : "no");
+            L("Sync", !hd.Synced ? "no" : hd.MerLower <= 0 && hd.MerUpper <= 0 ? "yes  MER measuring…" : $"yes  MER {hd.MerLower:0.0} / {hd.MerUpper:0.0} dB");
             L("BER", hd.Synced ? $"{hd.Ber:0.00000}" : "—");
             L("Programs", hd.Programs.Count == 0 ? "—" : string.Join(" ", hd.Programs.Select(kv => $"HD{kv.Key + 1}{(kv.Key == eng.Program ? "*" : "")}")));
             L("Blend", (b.PlayingHd ? "HD" : "analog") + (b.Aligned ? $"  lead {b.HdLeadSeconds:0.000} s  score {b.AlignScore:0.00}" : "  not aligned"));
