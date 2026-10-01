@@ -70,7 +70,9 @@ internal sealed class MainForm : Form
         {
             _timer.Stop();
             var r = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
-            _c.Settings.WindowBounds = new[] { r.X, r.Y, r.Width, r.Height };
+            // always remember the closed faceplate's shape (the app starts with the faceplate up)
+            int h = _view.IsOpen ? (int)Math.Round(r.Width * 300 / DesignW) : r.Height;
+            _c.Settings.WindowBounds = new[] { r.X, r.Y, r.Width, h };
             _c.Dispose();
         };
     }

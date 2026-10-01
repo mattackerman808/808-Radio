@@ -42,9 +42,20 @@ internal sealed class NerdPanel : IDisposable
 
     // ------------------------------------------------------------------ data in
 
-    /// <summary>A new baseband power spectrum (4096 bins, dB, -fs/2 .. +fs/2).</summary>
+    /// <summary>A new baseband power spectrum (4096 bins, dB, -fs/2 .. +fs/2), used in the 744 kHz span.</summary>
     public void AddBaseband(float[] db)
     {
+        if (!Wide) AddRow(db);
+    }
+
+    private readonly Fft _devFft = new(4096);
+    private readonly float[] _devIq = new float[8192], _devDb = new float[4096];
+    private long _rowCenter;
+
+    private void AddRow(float[] db)
+    {
+        long f = _c.Frequency;
+        if (f != _rowCenter) { _rowCenter = f; ClearWaterfall(); }   // retuned: old rows no longer line up
         int per = db.Length / SpecW;
         var row = new float[SpecW];
         for (int c = 0; c < SpecW; c++)
@@ -58,8 +69,11 @@ internal sealed class NerdPanel : IDisposable
         // waterfall scale tracks the noise floor and the peak slowly
         var sorted = (float[])row.Clone();
         Array.Sort(sorted);
-        _wfFloor += 0.1f * (sorted[SpecW / 5] - 3 - _wfFloor);
-        _wfTop += 0.1f * (Math.Max(sorted[^1], _wfFloor + 25) - _wfTop);
+        float floor = sorted[SpecW / 5] - 3, top = Math.Max(sorted[^1], floor + 25);
+        float rate = _wfScaled ? 0.1f : 1f;   // after a clear, snap the color scale to the first row
+        _wfFloor += rate * (floor - _wfFloor);
+        _wfTop += rate * (top - _wfTop);
+        _wfScaled = true;
         WriteWaterfallRow(row);
     }
 
@@ -93,6 +107,11 @@ internal sealed class NerdPanel : IDisposable
     public void Tick(RadioEngine? eng)
     {
         if (eng == null) return;
+        if (Wide && eng.TryGetDeviceSpectrumBlock(_devIq))
+        {
+            _devFft.PowerDb(_devIq, _re, _im, _devDb);
+            AddRow(_devDb);
+        }
         if (eng.TryGetMpxBlock(_mpxIn))
         {
             for (int i = 0; i < 4096; i++) { _mpxIq[2 * i] = _mpxIn[i]; _mpxIq[2 * i + 1] = 0; }
@@ -152,19 +171,34 @@ internal sealed class NerdPanel : IDisposable
     private void DrawBaseband(Graphics g, float x, float y, Color lit)
     {
         long f = _c.Frequency;
-        Title(g, x, y, $"BASEBAND  ±372 kHz  ·  {f / 1e6:0.000} MHz", lit);
+        double half = HalfSpanKhz;
+        Title(g, x, y, $"SPECTRUM  ·  {f / 1e6:0.0} MHz  ·  click to tune, wheel to step", lit);
+        // span toggle, right-aligned on the title line
+        float rEdge = x + SpecW;
+        SpanToggle = new RectangleF(rEdge - 140, y - 2, 140, 16);
+        var dim = Color.FromArgb(90, lit);
+        Small(g, "SPAN", rEdge - 140, y + 1, 34, dim, StringAlignment.Near);
+        Small(g, "1.5 MHz", rEdge - 104, y + 1, 44, Wide ? lit : dim, StringAlignment.Near);
+        Small(g, "|", rEdge - 56, y + 1, 8, dim, StringAlignment.Near);
+        Small(g, "744 kHz", rEdge - 44, y + 1, 44, Wide ? dim : lit, StringAlignment.Near);
         var sr = new RectangleF(x, y + 18, SpecW, 100);
         Frame(g, sr);
-        // markers: analog channel and HD sidebands
-        float Px(double khz) => (float)(sr.X + (khz + 372.09) / 744.1875 * SpecW);
+        TuneArea = new RectangleF(x, sr.Y, SpecW, sr.Height + 1 + WaterH);
+        _tuneX0 = x;
+        float Px(double khz) => (float)(sr.X + (khz + half) / (2 * half) * SpecW);
+        // the current station's HD sidebands
         using (var hdB = new SolidBrush(Color.FromArgb(26, 0xF7, 0x94, 0x1D)))
         {
-            g.FillRectangle(hdB, Px(-198), sr.Y, Px(-129) - Px(-198), sr.Height + 1 + WaterH);
-            g.FillRectangle(hdB, Px(129), sr.Y, Px(198) - Px(129), sr.Height + 1 + WaterH);
+            g.FillRectangle(hdB, Px(-198), sr.Y, Px(-129) - Px(-198), sr.Height);
+            g.FillRectangle(hdB, Px(129), sr.Y, Px(198) - Px(129), sr.Height);
         }
+        // channel grid (US: odd tenths, 200 kHz apart)
+        var channels = new List<(long hz, float px)>();
+        long firstCh = Snap(f - (long)(half * 1000) + RadioEngine.ChannelStep / 2);
+        for (long ch = firstCh; ch <= f + half * 1000; ch += RadioEngine.ChannelStep)
+            channels.Add((ch, Px((ch - f) / 1000.0)));
         using (var grid = new Pen(Color.FromArgb(30, lit), 1) { DashStyle = DashStyle.Dot })
-            for (int k = -300; k <= 300; k += 100)
-                g.DrawLine(grid, Px(k), sr.Y, Px(k), sr.Bottom);
+            foreach (var (_, px) in channels) g.DrawLine(grid, px, sr.Y, px, sr.Bottom);
         if (_specValid)
         {
             float lo = _wfFloor, hi = _wfTop + 5;
@@ -187,12 +221,70 @@ internal sealed class NerdPanel : IDisposable
         if (topRows < WaterH) DrawFlipped(g, new Rectangle(0, topRows, SpecW, WaterH - topRows), wr.X, wr.Y + topRows);
         g.Restore(state);
         Frame(g, wr, fill: false);
-        // axis labels
-        foreach (int k in new[] { -300, -200, -100, 0, 100, 200, 300 })
-            Small(g, k == 0 ? "0" : $"{k:+0;-0}k", Px(k) - 16, wr.Bottom + 1, 32, Color.FromArgb(150, lit), StringAlignment.Center);
+        // axis: channel frequencies, the tuned one brighter
+        foreach (var (hz, px) in channels)
+            Small(g, (hz / 1e6).ToString("0.0"), px - 18, wr.Bottom + 1, 36, hz == Snap(f) ? lit : Color.FromArgb(140, lit), StringAlignment.Center);
         Small(g, "HD", Px(-163) - 10, sr.Y + 2, 20, Color.FromArgb(200, 0xF7, 0x94, 0x1D), StringAlignment.Center);
         Small(g, "HD", Px(163) - 10, sr.Y + 2, 20, Color.FromArgb(200, 0xF7, 0x94, 0x1D), StringAlignment.Center);
+
+        // tuned station marker
+        using (var tuned = new Pen(Color.FromArgb(150, 0xF7, 0x94, 0x1D), 1.2f)) g.DrawLine(tuned, Px(0), sr.Y, Px(0), wr.Bottom);
+
+        // hover: the channel under the mouse, shaded, with its frequency
+        if (HoverX is float hx && hx >= sr.X && hx <= sr.Right)
+        {
+            long ch = FrequencyAt(hx);
+            float a = Px((ch - f) / 1000.0 - 100), b = Px((ch - f) / 1000.0 + 100);
+            using (var hb = new SolidBrush(Color.FromArgb(40, lit))) g.FillRectangle(hb, a, sr.Y, b - a, sr.Height + 1 + WaterH);
+            using (var hp = new Pen(Color.FromArgb(200, lit), 1)) g.DrawLine(hp, hx, sr.Y, hx, wr.Bottom);
+            string label = $"{ch / 1e6:0.0} MHz";
+            float lx = Math.Clamp(hx + 6, sr.X + 2, sr.Right - 70);
+            using (var bg = new SolidBrush(Color.FromArgb(220, 0x03, 0x05, 0x06))) g.FillRectangle(bg, lx - 2, sr.Y + 16, 68, 15);
+            Small(g, label, lx, sr.Y + 17, 66, lit, StringAlignment.Near);
+        }
     }
+
+    // ---- tuning from the spectrum ----
+
+    /// <summary>Show the dongle's full 1.49 MHz instead of the 744 kHz HD baseband.</summary>
+    public bool Wide
+    {
+        get => _c.Settings.PanelWideSpan;
+        set { _c.Settings.PanelWideSpan = value; ClearWaterfall(); }
+    }
+
+    private double HalfSpanKhz => Wide ? FmReceiver.DeviceRate / 2000 : FmReceiver.HdRate / 2000;
+
+    /// <summary>The spectrum + waterfall area (design coordinates) that tunes on click.</summary>
+    public RectangleF TuneArea { get; private set; }
+    /// <summary>The span toggle in the title line.</summary>
+    public RectangleF SpanToggle { get; private set; }
+    /// <summary>Mouse x over the tune area (design coordinates), or null.</summary>
+    public float? HoverX { get; set; }
+    private float _tuneX0;
+
+    /// <summary>The channel (US 200 kHz grid) at a design x position in the spectrum.</summary>
+    public long FrequencyAt(float x)
+    {
+        double khz = (x - _tuneX0) / SpecW * 2 * HalfSpanKhz - HalfSpanKhz;
+        return Snap(_c.Frequency + (long)(khz * 1000));
+    }
+
+    private static long Snap(long hz)
+    {
+        long k = (long)Math.Round((hz - RadioEngine.FirstChannel) / (double)RadioEngine.ChannelStep);
+        return Math.Clamp(RadioEngine.FirstChannel + k * RadioEngine.ChannelStep, RadioEngine.FirstChannel, RadioEngine.LastChannel);
+    }
+
+    private void ClearWaterfall()
+    {
+        using (var g = Graphics.FromImage(_water)) g.Clear(Color.Black);
+        _waterRow = 0;
+        _specValid = false;
+        _wfScaled = false;
+    }
+
+    private bool _wfScaled;
 
     /// <summary>Draws a band of waterfall rows upside down (so newer rows end up above older ones).</summary>
     private void DrawFlipped(Graphics g, Rectangle src, float x, float y)

@@ -267,6 +267,11 @@ internal sealed class FaceplateView : Control
             g.DrawPath(pen, p);
         }
         if (_anim > 0.6f) _nerd.Draw(g, panel, lit);
+        if (_anim >= 1)
+        {
+            _hits.Add(new Hit(_nerd.TuneArea, "tune", null));   // click = tune (handled in OnMouseUp, needs the x)
+            _hits.Add(new Hit(_nerd.SpanToggle, "span", () => _nerd.Wide = !_nerd.Wide));
+        }
 
         // the folded faceplate's lip along the bottom; click it to close
         if (_anim >= 1)
@@ -767,10 +772,12 @@ internal sealed class FaceplateView : Control
             return;
         }
         var h = HitAt(p)?.Id;
+        float? hx = h == "tune" ? p.X : null;
+        if (hx != _nerd.HoverX) { _nerd.HoverX = hx; Invalidate(); }
         if (h != _hover)
         {
             _hover = h;
-            Cursor = h != null ? Cursors.Hand : Cursors.Default;
+            Cursor = h == "tune" ? Cursors.Cross : h != null ? Cursors.Hand : Cursors.Default;
             Invalidate();
         }
     }
@@ -781,7 +788,7 @@ internal sealed class FaceplateView : Control
         Flash($"VOL {Math.Round(_c.Settings.Volume * 40):0}", 1.0);
     }
 
-    protected override void OnMouseLeave(EventArgs e) { _hover = null; Invalidate(); }
+    protected override void OnMouseLeave(EventArgs e) { _hover = null; _nerd.HoverX = null; Invalidate(); }
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
@@ -815,7 +822,11 @@ internal sealed class FaceplateView : Control
         else if (e.Button == MouseButtons.Left && !_holdFired)
         {
             var h = HitAt(p);
-            if (h != null && h.Id == _pressed) h.Click?.Invoke();
+            if (h != null && h.Id == _pressed)
+            {
+                if (h.Id == "tune") _c.Tune(_nerd.FrequencyAt(p.X));
+                else h.Click?.Invoke();
+            }
         }
         _pressed = null;
         Invalidate();
@@ -824,6 +835,7 @@ internal sealed class FaceplateView : Control
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         var p = ToDesign(e.Location);
+        if (_open) { _c.Step(Math.Sign(e.Delta)); Invalidate(); return; }   // panel open: the wheel tunes
         if (p.X < 268) SetVolume(_c.Settings.Volume + Math.Sign(e.Delta) * 0.025f);   // over the knob side: volume
         else _c.Step(Math.Sign(e.Delta));                                              // over the display: tune
         Invalidate();

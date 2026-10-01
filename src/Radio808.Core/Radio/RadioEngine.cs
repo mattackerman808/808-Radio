@@ -214,6 +214,36 @@ public sealed class RadioEngine : IDisposable
         }
     }
 
+    private readonly float[] _devBuf = new float[2 * SpectrumSize];
+    private int _devFill;
+    private readonly object _devLock = new();
+
+    private void CaptureDevice(ReadOnlySpan<float> iq)
+    {
+        if (_devFill >= SpectrumSize) return;
+        lock (_devLock)
+        {
+            int n = Math.Min(iq.Length / 2, SpectrumSize - _devFill);
+            iq.Slice(0, 2 * n).CopyTo(_devBuf.AsSpan(2 * _devFill));
+            _devFill += n;
+        }
+    }
+
+    /// <summary>
+    /// Copies 4096 samples of the dongle's full-bandwidth I/Q (interleaved, at <see cref="FmReceiver.DeviceRate"/>,
+    /// centered on the tuned frequency) into <paramref name="dest"/> if a fresh block is ready.
+    /// </summary>
+    public bool TryGetDeviceSpectrumBlock(float[] dest)
+    {
+        if (Volatile.Read(ref _devFill) < SpectrumSize) return false;
+        lock (_devLock)
+        {
+            Array.Copy(_devBuf, dest, Math.Min(dest.Length, _devBuf.Length));
+            _devFill = 0;
+        }
+        return true;
+    }
+
     /// <summary>Copies 4096 MPX samples (at <see cref="FmReceiver.MpxRate"/>) into <paramref name="dest"/> if ready.</summary>
     public bool TryGetMpxBlock(float[] dest)
     {
@@ -288,6 +318,7 @@ public sealed class RadioEngine : IDisposable
             _skip--;
             return;
         }
+        CaptureDevice(iq);
         _rx.Process(iq);
     }
 

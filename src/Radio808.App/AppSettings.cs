@@ -32,6 +32,8 @@ public sealed class AppSettings
     /// <summary>Display mode: 0 = now playing, 1 = station name, 2 = frequency.</summary>
     public int DisplayMode { get; set; }
     public bool AlwaysOnTop { get; set; }
+    /// <summary>Instrument panel spectrum span: true = the dongle's full 1.49 MHz, false = the 744 kHz HD baseband.</summary>
+    public bool PanelWideSpan { get; set; } = true;
     public int[]? WindowBounds { get; set; }
 
     private static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "808Radio");
