@@ -57,8 +57,9 @@ name or frequency), a small one with the band and frequency (`FM 97.3`, or the H
 choose with **BAND**) and the clock, and a row of fixed status lights: **HD** (outlined: found; filled: you're hearing
 the digital audio), **WEAK** in red (HD found, with its station name and programs, but the signal is too poor to play
 its audio, so you hear the analog), the stereo rings, **RDS**, **SEEK**, **WX** / **TRAFFIC** (weather / traffic map
-available: click it), and the signal bars. The preset you're on is outlined in the row of preset keys. The slot on the right of the faceplate is
-the signal-quality meter (HD MER when HD is locked); it turns red with **OVL** if the dongle overloads.
+available: click it). The preset you're on is outlined in the row of preset keys. The slot on the right of the
+faceplate is the signal meter: the reception quality of what you're hearing (HD MER while HD plays, else the FM stereo pilot's
+signal-to-noise); it turns red with **OVL** if the dongle overloads.
 The square at the right of the display shows the HD album art or station logo (click it for a bigger picture with the
 song and station), or else an old-school audio spectrum analyzer; right-click → *Album art on the display* to always
 have the analyzer.

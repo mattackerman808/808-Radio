@@ -5,9 +5,12 @@
 - **Display reworked like a real head unit's:** a large dot-matrix line; a full-width small one with the band and
   frequency (`FM 107.7`, or the HD program you're hearing, `HD2 107.7`) and the clock; and a row of fixed status
   lights, each lit or dark, nothing moving: **HD**, **WEAK** (red), the classic interlocking-rings stereo indicator,
-  **RDS**, **SEEK**, **WX**, **TRAFFIC**, then the signal bars. The HD1/HD2/… tags that came and went are gone;
+  **RDS**, **SEEK**, **WX**, **TRAFFIC**. The HD1/HD2/… tags that came and went are gone;
   **BAND** steps through the HD programs (`HD2/3 CLASSIC ROCK`). DGTL is folded into HD (filled: digital audio), the
   "HD IN 12S" countdown into WEAK, and the P1–P6 badge into the preset keys (the one you're on is outlined).
+- **One signal meter**, the slot on the right of the faceplate, showing the reception quality of what you're
+  hearing: HD MER while HD plays, else the FM pilot SNR (it used to switch to HD MER whenever HD was found, even when
+  too weak to play). The small signal bars on the display, which duplicated it, are gone.
 - **WEAK** lights next to **HD** (and the instrument panel shows Sync "weak", Blend "HD too weak to play") when a station's HD
   is found, with its name and program list, but its bit error rate is too high for the audio to decode, so you're
   hearing the analog. Before, the HD badge and program tags suggested HD was playing.

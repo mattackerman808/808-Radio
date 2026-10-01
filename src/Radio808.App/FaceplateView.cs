@@ -700,14 +700,6 @@ internal sealed class FaceplateView : Control
         x = wxEnd;
         float trfEnd = Indicator(g, x, 172, "TRAFFIC", trf, false, lit);
         if (trf) _hits.Add(new Hit(new RectangleF(x - 2, 168, trfEnd - x, 22), "trf", () => MapRequested?.Invoke("traffic")));
-        // signal bars, right-aligned under the clock
-        int bars = eng == null ? 0 : Math.Clamp((int)Math.Round((eng.Receiver.ChannelPowerDb + 52) / 8), 0, 5);
-        for (int i = 0; i < 5; i++)
-        {
-            float bh = 4 + i * 3;
-            using var b = new SolidBrush(i < bars ? lit : ghost);
-            g.FillRectangle(b, 748 + i * 6, 187 - bh, 4, bh);
-        }
 
         // art square: album art / station logo (click to enlarge), else the audio spectrum analyzer
         var sq = AnalyzerArea;
@@ -892,7 +884,8 @@ internal sealed class FaceplateView : Control
     private void DrawRightSide(Graphics g)
     {
         var lit = Lit;
-        // illuminated slot: vertical signal-quality meter (HD MER when synced, else FM channel power)
+        // illuminated slot: the signal meter, the reception quality of what you're hearing: HD MER while HD plays, else
+        // the FM stereo pilot's SNR (channel power for a mono station). It turns red with OVL when the dongle overloads.
         var slot = new RectangleF(928, 58, 34, 116);
         var eng = _c.Engine;
         bool overload = eng?.GainOptimizer.Overload == true;   // the ADC is clipping: the slot turns red
@@ -907,8 +900,11 @@ internal sealed class FaceplateView : Control
         if (eng != null)
         {
             var hd = eng.Hd;
-            q = hd.Synced ? Math.Clamp(((hd.MerLower + hd.MerUpper) / 2 - 3) / 15, 0, 1)
-                          : Math.Clamp((eng.Receiver.ChannelPowerDb + 52) / 40, 0, 1);
+            var st = eng.Receiver.Stereo;
+            // HD MER 3..18 dB; pilot SNR 10..45 dB (strong stations 35-50, weak ~15); power -52..-12 dBFS
+            q = eng.Blender.PlayingHd ? Math.Clamp(((hd.MerLower + hd.MerUpper) / 2 - 3) / 15, 0, 1)
+              : st.PilotLocked ? Math.Clamp((st.PilotSnrDb - 10) / 35, 0, 1)
+              : Math.Clamp((eng.Receiver.ChannelPowerDb + 52) / 40, 0, 1);
         }
         int segs = 10;
         for (int s = 0; s < segs; s++)
