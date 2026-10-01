@@ -53,8 +53,9 @@ anywhere, though the tuning grid, de-emphasis and program types are US defaults 
 | **Right-click** | source (USB or network dongle), gain, frequency correction, antenna power (bias-tee), album art, panel frame rate, always on top, … |
 
 Drag the faceplate to move it; drag its edges to resize. The display has a large dot-matrix line (now playing, station
-name or frequency), a small one with the band and frequency (`FM 97.3`, or the HD program you're hearing, `HD2 97.3`:
-choose with **HD CH**; the station's HD programs are listed after it, `HD 1 2 3`) and the clock, and a row of fixed status lights: **HD** (outlined: found; filled: you're hearing
+name or frequency), a small one with the band and frequency, the station's HD programs and the clock
+(`FM 97.3  HD 1 2 3  11:52`: the program you're hearing is lit, the one you've chosen blinks while it locks in;
+choose with **HD CH** or click a number), and a row of fixed status lights: **HD** (outlined: found; filled: you're hearing
 the digital audio), **WEAK** in red (HD found, with its station name and programs, but the signal is too poor to play
 its audio, so you hear the analog), the stereo rings, **RDS**, **SEEK**, **WX** / **TRAFFIC** (weather / traffic map
 available: click it). The preset you're on is outlined in the row of preset keys. The slot on the right of the

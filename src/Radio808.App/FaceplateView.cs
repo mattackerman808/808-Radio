@@ -676,16 +676,18 @@ internal sealed class FaceplateView : Control
         if (eng == null && !_c.Starting) _hits.Add(new Hit(new RectangleF(284, 64, 500, 64), "start", () => _ = _c.StartAsync()));
 
         // line 2: a full-width small dot-matrix line: band + frequency on the left ("HD2 107.7"), the clock on the right
-        string band = playingHd && eng != null ? $"HD{eng.Program + 1}" : "FM";
-        string left = $"{band,-4}{mhz,5}", clockText = DateTime.Now.ToString("H:mm").PadLeft(5);
+        // the band and frequency stay put ("FM 97.3"); the HD program is shown in the list after them
+        string left = $"{"FM",-4}{mhz,5}", clockText = DateTime.Now.ToString("H:mm").PadLeft(5);
         var l2 = DotMatrix.Columns(left + new string(' ', Line2Cells - left.Length - clockText.Length) + clockText);
         DotMatrix.Draw(g, l2, 0, 292, 136, 3.1f, Line2Cells, lit, ghost, glow: false);   // ends ~776, left of the art square
-        // the station's HD programs in the middle ("HD 1 2 3"): the one you're hearing fully lit, the rest dimmer (all
-        // dimmer when HD isn't playing); click a number to switch
+        // the station's HD programs in the middle ("HD 1 2 3"): the one you're hearing fully lit; the one you've chosen
+        // blinks while it locks in (switching programs, or HD coming back); the rest dimmer. All dimmer when HD is too
+        // weak to play (WEAK says why). Click a number to switch.
         if (hd != null && synced && hd.Programs.Count > 0 && eng != null)
         {
             const float pitch = 3.1f, cellW = pitch * DotMatrix.CellCols;
             var dim = Color.FromArgb(110, lit);
+            bool tooWeak = eng.HdTooWeak, blinkOn = DateTime.UtcNow.Millisecond < 500;
             var progs = hd.Programs.Keys.ToList();
             int cell = 11;
             void Cell(string ch, Color c) => DotMatrix.Draw(g, DotMatrix.Columns(ch), 0, 292 + cell * cellW, 136, pitch, 1, c, ghost, glow: false);
@@ -695,7 +697,9 @@ internal sealed class FaceplateView : Control
             foreach (uint p in progs)
             {
                 uint prog = p;
-                Cell(((p + 1) % 10).ToString(), playingHd && p == eng.Program ? lit : dim);
+                bool chosen = p == eng.Program;
+                var c = !chosen ? dim : playingHd ? lit : !tooWeak && !_c.Settings.ForceAnalog && blinkOn ? lit : dim;
+                Cell(((p + 1) % 10).ToString(), c);
                 _hits.Add(new Hit(new RectangleF(292 + cell * cellW - 2, 132, cellW + 2, 30), "prog" + p, () =>
                 {
                     _c.SetProgram(prog);

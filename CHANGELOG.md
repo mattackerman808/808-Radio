@@ -3,12 +3,12 @@
 ## Unreleased
 
 - **Display reworked like a real head unit's:** a large dot-matrix line; a full-width small one with the band and
-  frequency (`FM 107.7`, or the HD program you're hearing, `HD2 107.7`) and the clock; and a row of fixed status
-  lights, each lit or dark, nothing moving: **HD**, **WEAK** (red), the classic interlocking-rings stereo indicator,
-  **RDS**, **SEEK**, **WX**, **TRAFFIC**. The HD1/HD2/… tags that came and went are gone;
-  the small line lists the station's HD programs (`HD 1 2 3`: the one you hear lit, click one to switch), and the
-  **BAND** key is renamed **HD CH** and steps through them (`HD2/3 CLASSIC ROCK`). DGTL is folded into HD (filled: digital audio), the
-  "HD IN 12S" countdown into WEAK, and the P1–P6 badge into the preset keys (the one you're on is outlined).
+  frequency, the station's HD programs and the clock (`FM 97.3  HD 1 2 3  11:52`: the program you're hearing lit,
+  the one you've chosen blinking while it locks in, click one to switch); and a row of fixed status lights, each lit
+  or dark, nothing moving: **HD**, **WEAK** (red), the classic interlocking-rings stereo indicator, **RDS**, **SEEK**,
+  **WX**, **TRAFFIC**. The HD1/HD2/… tags that came and went are gone, and the **BAND** key is renamed **HD CH**: it
+  steps through the programs (`HD2/3 CLASSIC ROCK`). DGTL is folded into HD (filled: digital audio), the "HD IN 12S"
+  countdown into WEAK, and the P1–P6 badge into the preset keys (the one you're on is outlined).
 - **One signal meter**, the slot on the right of the faceplate, showing the reception quality of what you're
   hearing: HD MER while HD plays, else the FM pilot SNR (it used to switch to HD MER whenever HD was found, even when
   too weak to play). The small signal bars on the display, which duplicated it, are gone.
