@@ -229,6 +229,40 @@ internal sealed class MainForm : Form
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
+    /// <summary>Source submenu: the USB dongle, network dongles found by mDNS, the saved address, and manual entry.</summary>
+    private void FillSourceMenu(ToolStripMenuItem src)
+    {
+        var s = _c.Settings;
+        string? current = s.UseRtlTcp ? s.RtlTcpAddress : null;
+        src.DropDownItems.Clear();
+        src.DropDownItems.Add(new ToolStripMenuItem("USB dongle", null, (_, _) => { if (s.UseRtlTcp) _c.SetSource(null); })
+            { Checked = !s.UseRtlTcp });
+        src.DropDownItems.Add(new ToolStripSeparator());
+        bool savedListed = false;
+        foreach (var server in _c.Discovered)
+        {
+            string addr = server.ConnectAddress;
+            bool on = string.Equals(current, addr, StringComparison.OrdinalIgnoreCase);
+            savedListed |= string.Equals(s.RtlTcpAddress, addr, StringComparison.OrdinalIgnoreCase);
+            src.DropDownItems.Add(new ToolStripMenuItem($"{server.Name}  ({addr})", null, (_, _) => { if (!on) _c.SetSource(addr); })
+                { Checked = on, ToolTipText = server.Address?.ToString() });
+        }
+        if (!savedListed && !string.IsNullOrWhiteSpace(s.RtlTcpAddress))
+            src.DropDownItems.Add(new ToolStripMenuItem($"Network: {s.RtlTcpAddress}", null, (_, _) =>
+            {
+                if (!s.UseRtlTcp) _c.SetSource(s.RtlTcpAddress);
+            }) { Checked = s.UseRtlTcp });
+        if (_c.Discovering)
+            src.DropDownItems.Add(new ToolStripMenuItem("Searching the network…") { Enabled = false });
+        else if (_c.Discovered.Count == 0)
+            src.DropDownItems.Add(new ToolStripMenuItem("No network dongles found") { Enabled = false });
+        src.DropDownItems.Add(new ToolStripMenuItem("Network dongle (rtl_tcp)…", null, (_, _) =>
+        {
+            var addr = AskAddress(s.RtlTcpAddress ?? "");
+            if (addr != null) _c.SetSource(addr);
+        }));
+    }
+
     /// <summary>Asks for an rtl_tcp server address. Null if cancelled.</summary>
     private string? AskAddress(string current)
     {
@@ -287,18 +321,12 @@ internal sealed class MainForm : Form
         m.Items.Add(new ToolStripMenuItem(_view.IsOpen ? "Close faceplate" : "Open faceplate (signal details)", null, (_, _) => _view.ToggleOpen()));
         m.Items.Add(new ToolStripSeparator());
         var src = new ToolStripMenuItem("Source");
-        src.DropDownItems.Add(new ToolStripMenuItem("USB dongle", null, (_, _) => { if (_c.Settings.UseRtlTcp) _c.SetSource(null); })
-            { Checked = !_c.Settings.UseRtlTcp });
-        if (!string.IsNullOrWhiteSpace(_c.Settings.RtlTcpAddress))
-            src.DropDownItems.Add(new ToolStripMenuItem($"Network: {_c.Settings.RtlTcpAddress}", null, (_, _) =>
-            {
-                if (!_c.Settings.UseRtlTcp) _c.SetSource(_c.Settings.RtlTcpAddress);
-            }) { Checked = _c.Settings.UseRtlTcp });
-        src.DropDownItems.Add(new ToolStripMenuItem("Network dongle (rtl_tcp)…", null, (_, _) =>
-        {
-            var addr = AskAddress(_c.Settings.RtlTcpAddress ?? "");
-            if (addr != null) _c.SetSource(addr);
-        }));
+        FillSourceMenu(src);
+        // look for network dongles while the menu is open, and list them as they're found
+        void Refresh() { if (!m.IsDisposed) FillSourceMenu(src); }
+        _c.DiscoveryChanged += Refresh;
+        m.Closed += (_, _) => _c.DiscoveryChanged -= Refresh;
+        _ = _c.DiscoverAsync();
         m.Items.Add(src);
         m.Items.Add(new ToolStripMenuItem("Auto HD", null, (_, _) => _c.SetForceAnalog(!_c.Settings.ForceAnalog)) { Checked = !_c.Settings.ForceAnalog });
         m.Items.Add(new ToolStripMenuItem("Multipath equalizer", null, (_, _) => _c.SetEqualizer(!_c.Settings.Equalizer)) { Checked = _c.Settings.Equalizer });

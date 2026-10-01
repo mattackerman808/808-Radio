@@ -9,8 +9,14 @@ set -eu
 
 if [ "$(id -u)" != 0 ]; then echo "Run as root (sudo sh $0)"; exit 1; fi
 
-echo "== Installing rtl-sdr"
-DEBIAN_FRONTEND=noninteractive apt-get install -y rtl-sdr
+# install <file in pi/> <destination>: from next to this script, or from GitHub when piped through curl
+fetch() {
+    if [ -f "$(dirname "$0")/$1" ]; then cp "$(dirname "$0")/$1" "$2"
+    else curl -fsSL "https://raw.githubusercontent.com/mattackerman808/808-Radio/main/pi/$1" -o "$2"; fi
+}
+
+echo "== Installing rtl-sdr and avahi (so 808 Radio finds this machine by itself)"
+DEBIAN_FRONTEND=noninteractive apt-get install -y rtl-sdr avahi-daemon
 
 echo "== Keeping the DVB-T TV driver off the dongle"
 cat > /etc/modprobe.d/rtl-sdr-blacklist.conf <<'EOF'
@@ -23,12 +29,9 @@ EOF
 for m in rtl2832_sdr dvb_usb_rtl28xxu rtl2832 r820t; do modprobe -r "$m" 2>/dev/null || true; done
 
 echo "== Installing the rtl-tcp service"
-if [ -f "$(dirname "$0")/rtl-tcp.service" ]; then
-    cp "$(dirname "$0")/rtl-tcp.service" /etc/systemd/system/rtl-tcp.service
-else
-    curl -fsSL https://raw.githubusercontent.com/mattackerman808/808-Radio/main/pi/rtl-tcp.service \
-        -o /etc/systemd/system/rtl-tcp.service
-fi
+fetch rtl-tcp.service /etc/systemd/system/rtl-tcp.service
+mkdir -p /etc/avahi/services
+fetch rtl-tcp.avahi.service /etc/avahi/services/rtl-tcp.service   # avahi picks it up by itself
 systemctl daemon-reload
 systemctl enable rtl-tcp.service
 systemctl restart rtl-tcp.service
@@ -36,9 +39,10 @@ sleep 2
 
 if systemctl is-active --quiet rtl-tcp.service; then
     echo
-    echo "rtl_tcp is running. In 808 Radio: right-click > Source > Network dongle (rtl_tcp), and enter:"
+    echo "rtl_tcp is running. 808 Radio finds it by itself: right-click > Source > \"rtl_tcp on $(hostname)\"."
+    echo "(If it isn't listed, choose Network dongle (rtl_tcp)... and enter $(hostname).local or one of:"
     for a in $(hostname -I); do case "$a" in *:*) ;; *) echo "    $a" ;; esac; done
-    echo "    or $(hostname).local"
+    echo ")"
 else
     echo
     echo "rtl_tcp isn't running yet (is the dongle plugged in?). It retries every few seconds. Log:"

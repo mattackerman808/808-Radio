@@ -9,6 +9,16 @@ namespace Radio808.Tools;
 
 internal static class NetTools
 {
+    /// <summary>Lists rtl_tcp servers advertised on the local network (mDNS / DNS-SD).</summary>
+    public static int Discover(double seconds)
+    {
+        var sw = Stopwatch.StartNew();
+        var found = RtlTcpDiscovery.BrowseAsync(TimeSpan.FromSeconds(seconds)).GetAwaiter().GetResult();
+        Console.WriteLine($"{found.Count} rtl_tcp server(s) in {sw.Elapsed.TotalSeconds:0.0} s");
+        foreach (var s in found) Console.WriteLine($"  {s.Name,-28} {s.Host}:{s.Port}  {s.Address}");
+        return found.Count > 0 ? 0 : 1;
+    }
+
     /// <summary>
     /// Measures an rtl_tcp link: throughput, drops, and the control latency (time from a command to the first samples
     /// that show it), by toggling the gain between its lowest and a high step and watching the signal power jump.

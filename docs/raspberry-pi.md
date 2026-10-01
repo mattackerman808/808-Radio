@@ -21,17 +21,21 @@ On the Pi, with the dongle plugged in:
 curl -fsSL https://raw.githubusercontent.com/mattackerman808/808-Radio/main/pi/install-rtl-tcp.sh | sudo sh
 ```
 
-(or copy [`pi/install-rtl-tcp.sh`](../pi/install-rtl-tcp.sh) and [`pi/rtl-tcp.service`](../pi/rtl-tcp.service) over
-and run `sudo sh install-rtl-tcp.sh`). It:
+(or copy the files in [`pi/`](../pi) over and run `sudo sh install-rtl-tcp.sh`). It:
 
-1. installs the `rtl-sdr` package,
+1. installs the `rtl-sdr` and `avahi-daemon` packages,
 2. stops the kernel's DVB-T TV driver from claiming the dongle,
 3. installs and starts `rtl-tcp.service`: `rtl_tcp` on port 1234, started at boot and restarted if it stops or the
-   dongle is replugged.
+   dongle is replugged,
+4. advertises it on the network (mDNS / DNS-SD, service type `_rtl-tcp._tcp`) so 808 Radio can find it.
 
-Then in 808 Radio: right-click → **Source** → **Network dongle (rtl_tcp)…**, and enter the Pi's name or address
-(e.g. `raspberrypi.local` or `192.168.1.50`; add `:port` if you changed it). 808 Radio remembers it and reconnects by
-itself if the Pi reboots or the network drops. **Source → USB dongle** switches back.
+Then in 808 Radio, right-click → **Source**: the Pi is listed as **rtl_tcp on _hostname_**; click it. If there's no
+dongle plugged into the PC, 808 Radio looks on the network by itself and switches to the first one it finds. It
+remembers the choice and reconnects by itself if the Pi reboots or the network drops. **Source → USB dongle** switches
+back.
+
+For a server that isn't advertised (another network, a different setup), choose **Network dongle (rtl_tcp)…** and
+enter its name or address (e.g. `raspberrypi.local` or `192.168.1.50`; add `:port` if it isn't 1234).
 
 The instrument panel's **Link** line shows the data rate, the receive queue and any dropped blocks.
 

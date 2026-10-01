@@ -31,7 +31,7 @@ anywhere and run `808Radio.exe`. It's self-contained: no installer, no .NET inst
 - Windows 10 or 11, x64.
 
 **Or a network dongle:** plug the dongle into a Raspberry Pi near the antenna, run the standard `rtl_tcp` server there
-(one-line setup script), and choose *Source → Network dongle* in 808 Radio. See
+(one-line setup script); 808 Radio finds it on the network by itself (mDNS) and lists it under *Source*. See
 [docs/raspberry-pi.md](docs/raspberry-pi.md). It needs about 24 Mbit/s: Ethernet, or good 5 GHz Wi-Fi.
 
 HD Radio is broadcast in North America (and a few other places); the analog radio, RDS and the instrument panel work
@@ -126,7 +126,7 @@ For development, `dotnet build src/Radio808.App -c Release` after the native lib
 | `play <MHz> [gain\|auto]` | the radio in a console, with live stats |
 | `selftest [CNR] [echo dB] [echo µs]` | synthetic stereo broadcast through the receiver |
 | `gainsweep`, `gaintest`, `ppmtest`, `ctlstress` | gain, frequency-correction and control-path tests |
-| `netlatency <host[:port]> [MHz]` | an rtl_tcp link's throughput, drops and command latency (`play` uses rtl_tcp when `R808_RTLTCP=host` is set) |
+| `discover`, `netlatency <host[:port]> [MHz]` | find rtl_tcp servers (mDNS); an rtl_tcp link's throughput, drops and command latency (`play` uses rtl_tcp when `R808_RTLTCP=host` is set) |
 
 ## Credits
 

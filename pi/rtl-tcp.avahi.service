@@ -1,0 +1,12 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!-- Advertises rtl_tcp on the local network (mDNS/DNS-SD), so 808 Radio finds it without typing an address.
+     Installed by install-rtl-tcp.sh as /etc/avahi/services/rtl-tcp.service. The port must match rtl-tcp.service. -->
+<service-group>
+  <name replace-wildcards="yes">rtl_tcp on %h</name>
+  <service>
+    <type>_rtl-tcp._tcp</type>
+    <port>1234</port>
+    <txt-record>server=rtl_tcp</txt-record>
+  </service>
+</service-group>

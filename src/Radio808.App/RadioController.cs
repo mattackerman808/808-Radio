@@ -1,6 +1,9 @@
 using System;
 using System.Threading;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
+using Radio808.Core.Devices;
 using Radio808.Core.Radio;
 
 namespace Radio808.App;
@@ -36,6 +39,7 @@ public sealed class RadioController : IDisposable
     public async Task StartAsync()
     {
         if (Engine != null || Starting) return;
+        bool noUsbDongle = false;
         Starting = true;
         Error = null;
         Changed?.Invoke();
@@ -44,9 +48,9 @@ public sealed class RadioController : IDisposable
             double? gain = Settings.AutoGain ? null : Settings.GainDb ?? RadioEngine.DefaultGainDb;
             string? net = Networked ? Settings.RtlTcpAddress : null;
             var engine = ReplayDirectory != null
-                ? await Task.Run(() => RadioEngine.StartAsync(new Radio808.Core.Devices.ReplaySource(ReplayDirectory), Frequency, gain))
+                ? await Task.Run(() => RadioEngine.StartAsync(new ReplaySource(ReplayDirectory), Frequency, gain))
                 : net != null
-                ? await Task.Run(() => RadioEngine.StartAsync(new Radio808.Core.Devices.RtlTcpSource(net), Frequency, gain))
+                ? await Task.Run(() => RadioEngine.StartAsync(new RtlTcpSource(net), Frequency, gain))
                 : await Task.Run(() => RadioEngine.StartAsync(Frequency, null, gain));
             engine.Volume = Settings.Volume * Settings.Volume;
             engine.Muted = Settings.Muted;
@@ -66,12 +70,68 @@ public sealed class RadioController : IDisposable
         {
             Error = Friendly(ex);
             if (Networked) { Error += " Retrying…"; RetryLater(); }
+            else if (ReplayDirectory == null && ex.Message.Contains("No RTL-SDR")) noUsbDongle = true;
         }
         finally
         {
             Starting = false;
             Changed?.Invoke();
         }
+        // no dongle on this PC: if there's one on the network, use that
+        if (noUsbDongle && !_disposed)
+        {
+            Error = "No RTL-SDR on this PC. Looking on the network…";
+            Changed?.Invoke();
+            var found = await DiscoverAsync();
+            if (found.Count > 0 && Engine == null && !Starting && !Networked)
+            {
+                Message?.Invoke("FOUND " + found[0].Name.ToUpperInvariant());
+                SetSource(found[0].ConnectAddress);
+            }
+            else if (Engine == null && !Starting)
+            {
+                Error = Friendly(new InvalidOperationException("No RTL-SDR"));
+                Changed?.Invoke();
+            }
+        }
+    }
+
+    // ---- network dongles (rtl_tcp) found by mDNS ----
+
+    private readonly Dictionary<string, (RtlTcpServer server, DateTime seen)> _found = new();
+    private Task<IReadOnlyList<RtlTcpServer>>? _browse;
+
+    /// <summary>rtl_tcp servers seen on the network in the last few minutes, by name.</summary>
+    public IReadOnlyList<RtlTcpServer> Discovered => _found.Values
+        .Where(f => DateTime.UtcNow - f.seen < TimeSpan.FromMinutes(5)).Select(f => f.server)
+        .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    public bool Discovering => _browse != null;
+    /// <summary>A network search started or finished.</summary>
+    public event Action? DiscoveryChanged;
+
+    /// <summary>Searches the local network for rtl_tcp servers (about 1.5 s). Concurrent calls share one search.</summary>
+    public async Task<IReadOnlyList<RtlTcpServer>> DiscoverAsync()
+    {
+        if (_browse == null)
+        {
+            _browse = RtlTcpDiscovery.BrowseAsync(TimeSpan.FromSeconds(1.5));
+            DiscoveryChanged?.Invoke();
+            try
+            {
+                foreach (var s in await _browse) _found[s.ConnectAddress.ToLowerInvariant()] = (s, DateTime.UtcNow);
+            }
+            catch (Exception ex) { AppLog.Write(ex); }
+            finally
+            {
+                _browse = null;
+                DiscoveryChanged?.Invoke();
+            }
+        }
+        else
+        {
+            try { await _browse; } catch { }
+        }
+        return Discovered;
     }
 
     /// <summary>Using a network dongle (rtl_tcp) rather than a USB one.</summary>
