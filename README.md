@@ -10,8 +10,8 @@
 art, multicast channels (HD1–HD8), weather and traffic maps, blended with the analog signal like a real HD receiver.
 It finds the best gain for each station by itself and corrects the dongle's frequency error automatically.
 
-Flip the faceplate down (the ▲ key) and there's an instrument panel behind it: spectrum and waterfall with
-click-to-tune, the FM multiplex, and live signal statistics.
+Flip the faceplate down (the ▲ key) and there's an instrument panel behind it, drawn on the GPU at your display's
+refresh rate: spectrum and waterfall with click-to-tune, the FM multiplex, and live signal statistics.
 
 ![The instrument panel behind the faceplate](docs/images/808radio-open.png)
 
@@ -50,11 +50,14 @@ anywhere, though the tuning grid, de-emphasis and program types are US defaults 
 | **DISP** | now playing / station name / frequency (D) |
 | **Bulb key** | illumination color (C): cyan, amber, green, red, blue, white |
 | **▲** | flip the faceplate down to the instrument panel (O) |
-| **Right-click** | source (USB or network dongle), gain, frequency correction, antenna power (bias-tee), always on top, … |
+| **Right-click** | source (USB or network dongle), gain, frequency correction, antenna power (bias-tee), album art, panel frame rate, always on top, … |
 
 Drag the faceplate to move it; drag its edges to resize. The display shows **HD** (outlined: HD found; filled: playing
 HD), **DGTL** (you're hearing the digital audio), **ST** (stereo), **RDS**, and **P1–P6** when on a preset. The slot on
 the right is the signal-quality meter (HD MER when HD is locked); it turns red with **OVL** if the dongle overloads.
+The square at the right of the display shows the HD album art or station logo (click it for a bigger picture with the
+song and station), or else an old-school audio spectrum analyzer; right-click → *Album art on the display* to always
+have the analyzer.
 
 In the instrument panel, click a station in the spectrum or waterfall to tune it (the view slides it to the center),
 and scroll to step. **SPAN** switches between the dongle's full 1.5 MHz and the 744 kHz HD baseband.
@@ -75,6 +78,10 @@ Settings are saved in `%APPDATA%\808Radio\settings.json`; errors go to `808Radio
   (or stereo pilot SNR), with guards that drop the gain the moment the front end overloads.
 - **Automatic frequency correction**: a broadcaster's carrier is crystal-accurate, so the FM discriminator's average
   is the dongle's own tuning error; corrections of 1.5 ppm or more are applied and saved.
+- **Network dongle**: the RTL-SDR can be on a Raspberry Pi by the antenna, running `rtl_tcp`; 808 Radio finds it on
+  the network (mDNS) — see [docs/raspberry-pi.md](docs/raspberry-pi.md).
+- **Smooth instrument panel**: Direct2D on its own render thread, presented with the display (right-click → *Panel
+  frame rate*); GDI+ if there's no GPU.
 
 ## How it works
 

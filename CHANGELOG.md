@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-10-01)
 
 - Instrument panel: the network dongle's host and data rate share one **Source** line, so the statistics no
   longer run into the equalizer section; shorter Tuning and Gain lines (they were cut off).

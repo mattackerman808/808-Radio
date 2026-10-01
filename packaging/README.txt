@@ -23,7 +23,10 @@ USING IT
 - SRC switches HD / analog FM. BAND cycles HD programs (HD1, HD2 ...). DISP changes the display.
 - The small key above the left end of the display flips the faceplate down to a panel with a spectrum and
   waterfall (click a station to tune), signal statistics and meters.
-- Right-click for settings: colors, gain, frequency correction, antenna power (bias-tee), always on top.
+- The square on the right of the display shows HD album art (click it for a bigger picture) or an audio
+  spectrum analyzer.
+- Right-click for settings: source (USB or network dongle), colors, gain, frequency correction, antenna power
+  (bias-tee), album art on/off, instrument panel frame rate, always on top.
 
 Gain is automatic: 808 Radio finds the best gain for each station and avoids overloading the dongle.
 Frequency correction is measured automatically from FM stations.
