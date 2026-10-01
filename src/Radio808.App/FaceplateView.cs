@@ -615,11 +615,11 @@ internal sealed class FaceplateView : Control
         using (var dot = new SolidBrush(muted ? Grey : lit)) g.FillEllipse(dot, px - 3.5f, py - 3.5f, 7, 7);
         _hits.Add(new Hit(new RectangleF(cx - r - 12, cy - r - 12, 2 * r + 24, 2 * r + 24), "knob", null));
 
-        // HD CH (next HD program) / DISP
-        Label(g, "HD CH", 10, lit, new RectangleF(142, 196, 52, 14), StringAlignment.Center, bold: true);   // next HD program
-        Label(g, "DISP", 10, lit, new RectangleF(200, 196, 52, 14), StringAlignment.Center, bold: true);
-        Key(g, new RectangleF(142, 212, 52, 22), "band", NextProgram);
-        Key(g, new RectangleF(200, 212, 52, 22), "disp", NextDisplay);
+        // DISP / HD CH (next HD program)
+        Label(g, "HD CH", 10, lit, new RectangleF(200, 196, 52, 14), StringAlignment.Center, bold: true);   // next HD program
+        Label(g, "DISP", 10, lit, new RectangleF(142, 196, 52, 14), StringAlignment.Center, bold: true);
+        Key(g, new RectangleF(200, 212, 52, 22), "band", NextProgram);
+        Key(g, new RectangleF(142, 212, 52, 22), "disp", NextDisplay);
     }
 
     private static void Marquee(int len, int cells, ref int chars, ref int ticks)
@@ -800,15 +800,23 @@ internal sealed class FaceplateView : Control
         float bw = sq.Width / Bars;
         int segs = 13;
         float sh = sq.Height / segs;
-        using var on = new SolidBrush(Color.FromArgb(220, lit));
-        using var peak = new SolidBrush(lit);
+        // colored by height like a graphic-EQ display: the illumination color, then amber, then red at the top (with a
+        // red or amber illumination the low segments are green, the classic EQ look, so the colors still climb)
+        bool warm = lit.R > lit.G && lit.R > lit.B;
+        using var low = new SolidBrush(warm ? Color.FromArgb(0x3C, 0xE0, 0x6A) : Color.FromArgb(225, lit));
+        using var mid = new SolidBrush(Color.FromArgb(0xFF, 0xC8, 0x30));
+        using var high = new SolidBrush(Alert);
+        using var peak = new SolidBrush(Color.FromArgb(240, 255, 255, 255));
         using var off = new SolidBrush(ghost);
         for (int b = 0; b < Bars; b++)
         {
             int litSegs = _specValid ? (int)Math.Round(_bars[b] * segs) : 0;
             int peakSeg = _specValid ? (int)Math.Round(_peaks[b] * segs) - 1 : -1;   // the held peak, above the bar
             for (int s = 0; s < segs; s++)
+            {
+                var on = s >= segs - 3 ? high : s >= segs - 6 ? mid : low;
                 g.FillRectangle(s < litSegs ? on : s == peakSeg ? peak : off, sq.X + b * bw + 1, sq.Bottom - (s + 1) * sh + 1, bw - 2, sh - 2);
+            }
         }
     }
 
@@ -1008,6 +1016,19 @@ internal sealed class FaceplateView : Control
             bool on = s < Math.Round(q * segs);
             using var b = new SolidBrush(on ? lit : Color.FromArgb(22, lit));
             g.FillRectangle(b, slot.X + 9, slot.Bottom - 10 - (s + 1) * 9.4f, slot.Width - 18, 6.5f);
+        }
+        // under the slot, its legend: an antenna with radio waves (the signal meter)
+        using (var pen = new Pen(Color.FromArgb(overload ? 255 : 200, overload ? Alert : lit), 1.4f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        {
+            float ax = slot.X + slot.Width / 2, top = slot.Bottom + 6;
+            g.DrawLine(pen, ax, top + 3, ax, top + 15);                   // mast
+            g.DrawLine(pen, ax - 3.5f, top + 15, ax + 3.5f, top + 15);    // base
+            using (var tip = new SolidBrush(pen.Color)) g.FillEllipse(tip, ax - 1.6f, top + 1.4f, 3.2f, 3.2f);
+            foreach (float r in new[] { 5f, 9f })                         // waves either side
+            {
+                g.DrawArc(pen, ax - r, top + 3 - r, 2 * r, 2 * r, 150, 60);
+                g.DrawArc(pen, ax - r, top + 3 - r, 2 * r, 2 * r, -30, 60);
+            }
         }
         // jack
         using (var b = new SolidBrush(Color.FromArgb(0x04, 0x04, 0x05))) g.FillEllipse(b, 934, 200, 22, 22);

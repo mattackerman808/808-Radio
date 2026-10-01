@@ -13,7 +13,10 @@
   you're on is outlined).
 - **One signal meter**, the slot on the right of the faceplate, showing the reception quality of what you're
   hearing: HD MER while HD plays, else the FM pilot SNR (it used to switch to HD MER whenever HD was found, even when
-  too weak to play). The small signal bars on the display, which duplicated it, are gone.
+  too weak to play), with an antenna icon under it. The small signal bars on the display, which duplicated it, are
+  gone. DISP and HD CH swapped places (DISP on the left).
+- The audio analyzer is colored by height like a graphic-EQ display: the illumination color (green with a red or
+  amber illumination), then amber, then red, with white peak ticks.
 - **WEAK** lights next to **HD** (and the instrument panel shows Sync "weak", Blend "HD too weak to play") when a station's HD
   is found, with its name and program list, but its bit error rate is too high for the audio to decode, so you're
   hearing the analog. Before, the HD badge and program tags suggested HD was playing.
