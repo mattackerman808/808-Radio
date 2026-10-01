@@ -959,13 +959,14 @@ internal sealed class FaceplateView : Control
         Key(g, up, "seekup", () => _c.Seek(1), lit: _c.Seeking);
         SeekIcon(g, up, 1, lit);
         float x0 = 408, gap = 4, w = (912 - x0 - gap * 5) / 6;
+        int currentPreset = _c.CurrentPreset;   // one key lit, even if several presets hold this station
         for (int i = 0; i < AppSettings.PresetCount; i++)
         {
             var r = new RectangleF(x0 + i * (w + gap), y, w, h);
             int idx = i;
             var p = _c.Settings.Presets[i];
             // the preset you're on is outlined in the illumination color, its frequency lit
-            bool current = p != null && Math.Abs(p.Mhz * 1e6 - _c.Frequency) < 50_000;
+            bool current = i == currentPreset;
             Key(g, r, "preset" + i, () =>
             {
                 if (_c.Settings.Presets[idx] == null) { Flash($"HOLD {idx + 1} TO SAVE"); return; }

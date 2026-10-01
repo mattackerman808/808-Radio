@@ -242,11 +242,31 @@ public sealed class RadioController : IDisposable
     public void RecallPreset(int i)
     {
         var p = Settings.Presets[i];
-        if (p != null) Tune((long)Math.Round(p.Mhz * 1e6));
+        if (p == null) return;
+        Tune((long)Math.Round(p.Mhz * 1e6));
+        _lastPreset = i;
+    }
+
+    private int _lastPreset = -1;
+
+    /// <summary>
+    /// The preset for the station you're on, or -1: the one last recalled or saved if it's this frequency (several
+    /// presets can hold the same one), else the first that matches.
+    /// </summary>
+    public int CurrentPreset
+    {
+        get
+        {
+            bool Matches(int i) => Settings.Presets[i] is { } p && Math.Abs(p.Mhz * 1e6 - Frequency) < 50_000;
+            if (_lastPreset >= 0 && _lastPreset < Settings.Presets.Count && Matches(_lastPreset)) return _lastPreset;
+            for (int i = 0; i < Settings.Presets.Count; i++) if (Matches(i)) return i;
+            return -1;
+        }
     }
 
     public void StorePreset(int i, string? name)
     {
+        _lastPreset = i;
         Settings.Presets[i] = new Preset { Mhz = Math.Round(Frequency / 1e5) / 10, Name = name };
         Settings.Save();
         Changed?.Invoke();
