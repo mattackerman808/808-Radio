@@ -633,11 +633,14 @@ internal sealed class FaceplateView : Control
     {
         var eng = _c.Engine;
         if (eng == null || eng.Hd.Programs.Count == 0) { Flash("NO HD"); return; }
-        var progs = eng.Hd.Programs.Keys.ToList();
+        var hd = eng.Hd;
+        var progs = hd.Programs.Keys.ToList();
         int i = progs.IndexOf(eng.Program);
         var p = progs[(i + 1) % progs.Count];
         _c.SetProgram(p);
-        Flash($"HD{p + 1}");
+        // which one of how many, and its format if the station says ("HD2/3 CLASSIC ROCK")
+        string type = hd.Programs[p] is { Length: > 0 } t ? " " + t : "";
+        Flash($"HD{p + 1}/{progs.Count}{type}{(eng.HdTooWeak ? " WEAK" : "")}", 2.5);
     }
 
     // ------------------------------------------------------------------ the display
@@ -696,35 +699,20 @@ internal sealed class FaceplateView : Control
         var clock = DotMatrix.Columns(DateTime.Now.ToString("H:mm").PadLeft(5));
         DotMatrix.Draw(g, clock, 0, 700, 140, 3.1f, 5, lit, ghost, glow: false);   // ends at ~790, left of the art square
 
-        // line 3: HD programs, maps, alerts
+        // line 3: fixed legends, printed on the glass like a real head unit's display; each is either lit or dark and
+        // nothing moves. (The HD program is on the dot-matrix line above, "HD2 107.7", and BAND steps through them.)
         x = 292;
-        if (hd != null && synced)
-            foreach (var p in hd.Programs.Keys)
-            {
-                uint prog = p;
-                bool sel = eng != null && p == eng.Program;
-                // lit only while HD is what you hear; found-but-not-playing (weak, analog only, retrying) stays dim
-                float nx = Indicator(g, x, 172, $"HD{p + 1}", playingHd, sel && playingHd, lit);
-                _hits.Add(new Hit(new RectangleF(x - 2, 168, nx - x, 22), "prog" + p, () => { _c.SetProgram(prog); Flash($"HD{prog + 1}"); }));
-                x = nx;
-            }
-        if (hd?.WeatherMap != null)
-        {
-            float nx = Indicator(g, x + 8, 172, "WX", true, false, lit);
-            _hits.Add(new Hit(new RectangleF(x + 6, 168, nx - x - 6, 22), "wx", () => MapRequested?.Invoke("weather")));
-            x = nx;
-        }
-        if (hd != null && hd.TrafficTiles.Any(t => t != null))
-        {
-            float nx = Indicator(g, x + 8, 172, "TRF", true, false, lit);
-            _hits.Add(new Hit(new RectangleF(x + 6, 168, nx - x - 6, 22), "trf", () => MapRequested?.Invoke("traffic")));
-            x = nx;
-        }
-        if (_c.Seeking) Indicator(g, x + 8, 172, "SEEK", true, true, lit);
-        else if (eng != null && !_c.Settings.ForceAnalog && eng.HdTooWeak)
-            Indicator(g, x + 8, 172, "HD WEAK", true, false, lit);   // found (name, programs), but too weak to play
-        else if (eng != null && synced && !playingHd && !_c.Settings.ForceAnalog && eng.Blender.RetryIn > 0.5)
-            Indicator(g, x + 8, 172, $"HD IN {eng.Blender.RetryIn:0}S", true, false, lit);
+        bool wx = hd?.WeatherMap != null, trf = hd != null && hd.TrafficTiles.Any(t => t != null);
+        float wxEnd = Indicator(g, x, 172, "WX", wx, false, lit);
+        if (wx) _hits.Add(new Hit(new RectangleF(x - 2, 168, wxEnd - x, 22), "wx", () => MapRequested?.Invoke("weather")));
+        x = wxEnd;
+        float trfEnd = Indicator(g, x, 172, "TRF", trf, false, lit);
+        if (trf) _hits.Add(new Hit(new RectangleF(x - 2, 168, trfEnd - x, 22), "trf", () => MapRequested?.Invoke("traffic")));
+        x = trfEnd + 6;
+        x = Indicator(g, x, 172, "SEEK", _c.Seeking, _c.Seeking, lit);
+        // WEAK: HD found (name, programs) but too weak to play, or holding off after dropouts until it's steady again
+        bool weak = eng != null && !_c.Settings.ForceAnalog && (eng.HdTooWeak || synced && !playingHd && eng.Blender.RetryIn > 0.5);
+        Indicator(g, x, 172, "WEAK", weak, false, lit);
 
         // art square: album art / station logo (click to enlarge), else the audio spectrum analyzer
         var sq = AnalyzerArea;

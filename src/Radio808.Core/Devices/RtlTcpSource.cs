@@ -251,6 +251,10 @@ public sealed class RtlTcpSource : IIqSource
     private void ReadLoop()
     {
         string? error = null;
+        // A wedged server can keep the connection open and trickle data (seen: ~40 KB/s instead of 3 MB/s), which the
+        // read timeout never catches: if a running stream stays under 30% of its rate for two 2 s windows, reconnect.
+        long windowStart = Stopwatch.GetTimestamp(), windowBytes = 0;
+        int slowWindows = 0;
         try
         {
             while (!_closed)
@@ -259,6 +263,20 @@ public sealed class RtlTcpSource : IIqSource
                 // whole chunks keep I and Q aligned (the header was 12 bytes, so the stream is pair-aligned)
                 _stream.ReadExactly(chunk);
                 Interlocked.Add(ref _bytesReceived, ChunkBytes);
+                windowBytes += ChunkBytes;
+                double sec = (Stopwatch.GetTimestamp() - windowStart) / (double)Stopwatch.Frequency;
+                if (sec >= 2)
+                {
+                    double expected = 2.0 * _sampleRate * sec;
+                    slowWindows = _running && _sampleRate > 0 && windowBytes < 0.3 * expected ? slowWindows + 1 : 0;
+                    if (slowWindows >= 2)
+                    {
+                        error = $"The rtl_tcp server at {Host}:{Port} is sending too slowly ({windowBytes / sec / 1e6:0.00} of {expected / sec / 1e6:0.0} MB/s).";
+                        break;
+                    }
+                    windowStart = Stopwatch.GetTimestamp();
+                    windowBytes = 0;
+                }
                 if (!_running) { _pool.Add(chunk); continue; }
                 _queue.Enqueue(chunk);
                 _ready.Release();

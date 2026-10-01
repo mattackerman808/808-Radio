@@ -27,7 +27,8 @@ curl -fsSL https://raw.githubusercontent.com/mattackerman808/808-Radio/main/pi/i
 2. stops the kernel's DVB-T TV driver from claiming the dongle,
 3. installs and starts `rtl-tcp.service`: `rtl_tcp` on port 1234, started at boot and restarted if it stops or the
    dongle is replugged,
-4. advertises it on the network (mDNS / DNS-SD, service type `_rtl-tcp._tcp`) so 808 Radio can find it.
+4. advertises it on the network (mDNS / DNS-SD, service type `_rtl-tcp._tcp`) so 808 Radio can find it,
+5. runs a watchdog that restarts rtl_tcp if it hangs (see Notes).
 
 Then in 808 Radio, right-click → **Source**: the Pi is listed as **rtl_tcp on _hostname_**; click it. If there's no
 dongle plugged into the PC, 808 Radio looks on the network by itself and switches to the first one it finds. It
@@ -48,5 +49,9 @@ The instrument panel's **Source** line shows the Pi and the data rate (about 24 
 - **Antenna power** (bias-tee) from the right-click menu works over the network too; same caution as locally.
 - **Other software:** SDR#, SDR++, GQRX and others can use the same server (`rtl_tcp` source).
 - Logs on the Pi: `journalctl -u rtl-tcp -f`. Restart: `sudo systemctl restart rtl-tcp`.
+- **Watchdog:** rtl_tcp can hang when a client disconnects (it leaves the connection half-closed and stops serving;
+  sometimes the dongle is left stuck too). `rtl-tcp-watchdog.service` checks every 5 s and, after 10 s of that,
+  restarts rtl_tcp and resets the dongle's USB connection; 808 Radio reconnects by itself. Its log:
+  `journalctl -u rtl-tcp-watchdog`.
 - 808 Radio drains the stream continuously and drops audio (rather than falling behind) if the PC can't keep up, so
   the radio stays live; the service also caps `rtl_tcp`'s own backlog at about 2 seconds.

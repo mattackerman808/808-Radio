@@ -2,11 +2,17 @@
 
 ## Unreleased
 
-- **HD WEAK** on the display (Sync "weak" and "HD too weak to play" in the instrument panel) when a station's HD is
+- **Display reworked like a real head unit's:** the bottom row is fixed legends, lit or dark: **WX**, **TRF**,
+  **SEEK** and **WEAK**. The HD1/HD2/… tags that came and went are gone; the HD program you hear is on the dot-matrix
+  line (`HD2 107.7`), and **BAND** steps through the programs (`HD2/3 CLASSIC ROCK`). The "HD IN 12S" countdown text is
+  folded into **WEAK**.
+- **WEAK** lights (and the instrument panel shows Sync "weak", Blend "HD too weak to play") when a station's HD is
   found, with its name and program list, but its bit error rate is too high for the audio to decode, so you're
-  hearing the analog.
-  Before, the HD badge and HD1/HD2/HD3 suggested HD was playing; the HD1/HD2/HD3 tags now light up only while HD is
-  what you hear (dim otherwise, still clickable to choose a program).
+  hearing the analog. Before, the HD badge and program tags suggested HD was playing.
+- **Network dongle recovers from a wedged rtl_tcp.** rtl_tcp can hang when a client disconnects (half-closed socket,
+  a spinning CPU, sometimes a stuck dongle). The Pi setup now installs `rtl-tcp-watchdog.service`, which restarts
+  rtl_tcp and resets the dongle's USB connection when that happens; 808 Radio also reconnects if the stream trickles
+  in below 30% of its rate. Tested by freezing rtl_tcp: listening again within ~20 s, untouched.
 
 ## 0.3.0 (2026-10-01)
 

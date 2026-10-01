@@ -32,9 +32,13 @@ echo "== Installing the rtl-tcp service"
 fetch rtl-tcp.service /etc/systemd/system/rtl-tcp.service
 mkdir -p /etc/avahi/services
 fetch rtl-tcp.avahi.service /etc/avahi/services/rtl-tcp.service   # avahi picks it up by itself
+fetch rtl-tcp-watchdog.sh /usr/local/bin/rtl-tcp-watchdog.sh   # restarts rtl_tcp if it wedges
+fetch rtl-tcp-watchdog.service /etc/systemd/system/rtl-tcp-watchdog.service
 systemctl daemon-reload
 systemctl enable rtl-tcp.service
 systemctl restart rtl-tcp.service
+systemctl enable rtl-tcp-watchdog.service
+systemctl restart rtl-tcp-watchdog.service
 sleep 2
 
 if systemctl is-active --quiet rtl-tcp.service; then

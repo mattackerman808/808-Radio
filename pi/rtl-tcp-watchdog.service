@@ -1,0 +1,13 @@
+# Restarts rtl_tcp (and resets the dongle) if it wedges. Installed by install-rtl-tcp.sh as
+# /etc/systemd/system/rtl-tcp-watchdog.service, running /usr/local/bin/rtl-tcp-watchdog.sh.
+[Unit]
+Description=Watchdog for rtl_tcp (808 Radio)
+After=rtl-tcp.service
+
+[Service]
+ExecStart=/bin/sh /usr/local/bin/rtl-tcp-watchdog.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
