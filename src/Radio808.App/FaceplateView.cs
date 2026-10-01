@@ -654,13 +654,15 @@ internal sealed class FaceplateView : Control
         var lit = Lit;
         // illuminated slot: vertical signal-quality meter (HD MER when synced, else FM channel power)
         var slot = new RectangleF(928, 58, 34, 116);
+        var eng = _c.Engine;
+        bool overload = eng?.GainOptimizer.Overload == true;   // the ADC is clipping: the slot turns red
         using (var p = Rounded(slot, 8))
         {
             using (var b = new SolidBrush(Color.FromArgb(0x06, 0x07, 0x09))) g.FillPath(b, p);
-            using var pen = new Pen(lit, 1.6f);
+            using var pen = new Pen(overload ? Alert : lit, overload ? 2.4f : 1.6f);
             g.DrawPath(pen, p);
         }
-        var eng = _c.Engine;
+        if (overload) Label(g, "OVL", 9, Alert, new RectangleF(slot.X, slot.Y + 2, slot.Width, 12), StringAlignment.Center, bold: true);
         double q = 0;
         if (eng != null)
         {

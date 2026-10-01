@@ -41,9 +41,10 @@ public sealed class RadioController : IDisposable
         Changed?.Invoke();
         try
         {
+            double? gain = Settings.AutoGain ? null : Settings.GainDb ?? RadioEngine.DefaultGainDb;
             var engine = ReplayDirectory != null
-                ? await Task.Run(() => RadioEngine.StartAsync(new Radio808.Core.Devices.ReplaySource(ReplayDirectory), Frequency, Settings.GainDb))
-                : await Task.Run(() => RadioEngine.StartAsync(Frequency, null, Settings.GainDb));
+                ? await Task.Run(() => RadioEngine.StartAsync(new Radio808.Core.Devices.ReplaySource(ReplayDirectory), Frequency, gain))
+                : await Task.Run(() => RadioEngine.StartAsync(Frequency, null, gain));
             engine.Volume = Settings.Volume * Settings.Volume;
             engine.Muted = Settings.Muted;
             engine.ForceAnalog = Settings.ForceAnalog;
@@ -186,10 +187,13 @@ public sealed class RadioController : IDisposable
         if (Engine != null) Engine.ForceMono = on;
     }
 
+    /// <summary>Fixed gain in dB, or null for automatic peaking.</summary>
     public void SetGain(double? db)
     {
-        Settings.GainDb = db;
+        Settings.AutoGain = db is null;
+        if (db is not null) Settings.GainDb = db;
         if (Engine != null) Engine.Gain = db;
+        Settings.Save();
     }
 
     public void Dispose()

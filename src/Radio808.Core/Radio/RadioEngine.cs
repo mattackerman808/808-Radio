@@ -58,13 +58,17 @@ public sealed class RadioEngine : IDisposable
         _rx.Mpx += CaptureMpx;
         _dev.Samples += OnSamples;
         _dev.Stopped += m => DeviceStopped?.Invoke(m);
+        _optimizer = new GainOptimizer(this, _dev.Gains, DefaultGainDb);
     }
+
+    private readonly GainOptimizer _optimizer;
 
     /// <summary>
     /// Opens the dongle (the first one, unless given) and the default audio device, and starts playing.
-    /// Gain null = the tuner's AGC, which overloads on strong local stations; a fixed gain works much better.
+    /// Gain null = automatic: the <see cref="GainOptimizer"/> peaks it for each station (the tuner's own AGC overloads
+    /// on strong local stations, so it isn't used).
     /// </summary>
-    public static async Task<RadioEngine> StartAsync(long frequencyHz, RtlSdrInfo? device = null, double? gainDb = DefaultGainDb)
+    public static async Task<RadioEngine> StartAsync(long frequencyHz, RtlSdrInfo? device = null, double? gainDb = null)
     {
         var list = RtlSdrDevice.Enumerate();
         device ??= list.Count > 0 ? list[0] : throw new InvalidOperationException("No RTL-SDR found. Is it plugged in?");
@@ -72,15 +76,16 @@ public sealed class RadioEngine : IDisposable
     }
 
     /// <summary>Starts the radio on any IQ source (e.g. a <see cref="ReplaySource"/>). Takes ownership of it.</summary>
-    public static async Task<RadioEngine> StartAsync(IIqSource dev, long frequencyHz, double? gainDb = DefaultGainDb)
+    public static async Task<RadioEngine> StartAsync(IIqSource dev, long frequencyHz, double? gainDb = null)
     {
         AudioPlayer? player = null;
         try
         {
             dev.SampleRate = (uint)FmReceiver.DeviceRate;
-            dev.Gain = gainDb;
+            dev.Gain = gainDb ?? DefaultGainDb;   // automatic starts from the default and peaks from there
             player = await AudioPlayer.CreateAsync(FmReceiver.AudioRate).ConfigureAwait(false);
             var engine = new RadioEngine(dev, player);
+            engine.Gain = gainDb;
             engine.Frequency = frequencyHz;
             engine._hd.Start();
             dev.Start();
@@ -121,8 +126,25 @@ public sealed class RadioEngine : IDisposable
     public bool ForceMono { get => _rx.Stereo.ForceMono; set => _rx.Stereo.ForceMono = value; }
     public float Volume { get => _player.Volume; set => _player.Volume = Math.Clamp(value, 0, 1); }
     public bool Muted { get => _player.Muted; set => _player.Muted = value; }
-    /// <summary>Tuner gain in dB, or null for automatic.</summary>
-    public double? Gain { set => _dev.Gain = value; }
+    /// <summary>
+    /// Tuner gain: a fixed value in dB, or null for automatic (the <see cref="GainOptimizer"/> peaks it per station).
+    /// </summary>
+    public double? Gain
+    {
+        get => AutoGain ? null : _dev.Gain;
+        set
+        {
+            if (value is null) { _optimizer.Enabled = _dev.Gains.Count > 0; if (!_optimizer.Enabled) _dev.Gain = null; }
+            else { _optimizer.Enabled = false; _dev.Gain = value; }
+        }
+    }
+
+    public bool AutoGain => _optimizer.Enabled;
+    public GainOptimizer GainOptimizer => _optimizer;
+    /// <summary>The tuner gain actually in use, dB.</summary>
+    public double CurrentGainDb => _dev.Gain ?? 0;
+
+    internal void ApplyGain(double db) => _dev.Gain = db;
 
     /// <summary>
     /// Seeks to the next station up (+1) or down (-1), wrapping around the band. Audio is muted while seeking.
@@ -135,6 +157,7 @@ public sealed class RadioEngine : IDisposable
         int channels = (int)((LastChannel - FirstChannel) / ChannelStep) + 1;
         bool wasMuted = Muted;
         Muted = true;
+        IsSeeking = true;
         try
         {
             for (int i = 0; i < channels; i++)
@@ -159,6 +182,7 @@ public sealed class RadioEngine : IDisposable
         finally
         {
             Muted = wasMuted;
+            IsSeeking = false;
         }
     }
 
@@ -318,12 +342,32 @@ public sealed class RadioEngine : IDisposable
             _skip--;
             return;
         }
+        // ADC clipping: the 8-bit converter saturates at +-1.0 (the DC blocker can shift that by a hair)
+        int clip = 0;
+        for (int i = 0; i < iq.Length; i++) if (iq[i] > 0.98f || iq[i] < -0.98f) clip++;
+        Interlocked.Add(ref _clipCount, clip);
+        Interlocked.Add(ref _sampleCount, iq.Length);
         CaptureDevice(iq);
         _rx.Process(iq);
     }
 
+    private long _clipCount, _sampleCount;
+
+    /// <summary>Fraction of ADC samples at full scale since the last call.</summary>
+    public double TakeClipFraction()
+    {
+        long c = Interlocked.Exchange(ref _clipCount, 0), n = Interlocked.Exchange(ref _sampleCount, 0);
+        return n > 0 ? (double)c / n : 0;
+    }
+
+    /// <summary>Changes on every retune (for watchers like the gain optimizer).</summary>
+    public int RetuneGeneration => _retuneGeneration;
+    /// <summary>True while <see cref="SeekAsync"/> is stepping through the band.</summary>
+    public bool IsSeeking { get; private set; }
+
     public void Dispose()
     {
+        _optimizer.Dispose();
         _dev.Stop();
         _hd.Dispose();
         _player.Dispose();

@@ -496,9 +496,12 @@ internal sealed class NerdPanel : IDisposable
             H("RF");
             L("Device", eng.Device.Name);
             L("Tuning", $"{eng.Frequency / 1e6:0.000} MHz  @ {FmReceiver.DeviceRate / 1e6:0.000000} MS/s");
-            L("Gain", eng.Device.Gain is double gdb ? $"{gdb:0.0} dB" : "auto");
-            L("Channel", $"{rx.ChannelPowerDb:0.0} dBFS");
-            L("Multipath", $"ripple {rx.Equalizer.Ripple:0.000}  EQ {(rx.Equalizer.Enabled ? "on" : "off")}");
+            var opt = eng.GainOptimizer;
+            L("Gain", $"{eng.CurrentGainDb:0.0} dB  " + (eng.AutoGain
+                ? $"auto · {opt.State.ToString().ToLowerInvariant()}{(opt.Metric != "" ? " on " + opt.Metric : "")}"
+                : "fixed"));
+            L("ADC", opt.Overload ? $"⚠ OVERLOAD  {opt.Clipping * 100:0.00}% clipped" : $"clipping {opt.Clipping * 100:0.000}%  ok");
+            L("Signal", $"{rx.ChannelPowerDb:0.0} dBFS  ripple {rx.Equalizer.Ripple:0.000}{(rx.Equalizer.Enabled ? "" : "  EQ off")}");
             H("FM");
             L("Pilot", st.PilotLocked ? $"lock  {st.PilotLevel * 100:0.0}%  SNR {st.PilotSnrDb:0.0} dB" : "—");
             L("Stereo", $"blend {st.Blend:0.00}{(st.ForceMono ? "  (forced mono)" : "")}");

@@ -247,11 +247,13 @@ internal sealed class MainForm : Form
         m.Items.Add(new ToolStripMenuItem("Multipath equalizer", null, (_, _) => _c.SetEqualizer(!_c.Settings.Equalizer)) { Checked = _c.Settings.Equalizer });
         m.Items.Add(new ToolStripMenuItem("Force mono", null, (_, _) => _c.SetForceMono(!_c.Settings.ForceMono)) { Checked = _c.Settings.ForceMono });
         var gain = new ToolStripMenuItem("Tuner gain");
-        foreach (double? gdb in new double?[] { null, 8.7, 12.5, 16.6, 22.9, 29.7, 37.2 })
+        gain.DropDownItems.Add(new ToolStripMenuItem("Automatic (peak each station)", null, (_, _) => _c.SetGain(null)) { Checked = _c.Settings.AutoGain });
+        gain.DropDownItems.Add(new ToolStripSeparator());
+        foreach (double gdb in new[] { 8.7, 12.5, 16.6, 22.9, 29.7, 37.2, 44.5 })
         {
-            var v = gdb;
-            gain.DropDownItems.Add(new ToolStripMenuItem(v is null ? "Automatic" : $"{v} dB{(v == 16.6 ? " (default)" : "")}", null, (_, _) => _c.SetGain(v))
-            { Checked = _c.Settings.GainDb == v });
+            double v = gdb;
+            gain.DropDownItems.Add(new ToolStripMenuItem($"Fixed {v} dB", null, (_, _) => _c.SetGain(v))
+            { Checked = !_c.Settings.AutoGain && _c.Settings.GainDb == v });
         }
         m.Items.Add(gain);
         m.Items.Add(new ToolStripSeparator());

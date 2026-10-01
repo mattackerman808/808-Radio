@@ -40,6 +40,7 @@ public sealed class ReplaySource : IIqSource
     public IReadOnlyCollection<long> Frequencies => _files.Keys;
     public uint SampleRate { get; set; } = 1_488_375;
     public double? Gain { get; set; }
+    public IReadOnlyList<double> Gains { get; } = Array.Empty<double>();
 
     public long Frequency
     {

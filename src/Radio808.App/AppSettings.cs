@@ -24,7 +24,9 @@ public sealed class AppSettings
     public bool ForceAnalog { get; set; }
     public bool Equalizer { get; set; } = true;
     public bool ForceMono { get; set; }
-    /// <summary>Tuner gain in dB; null = automatic (not recommended: strong stations overload it).</summary>
+    /// <summary>Peak the tuner gain automatically for each station (recommended).</summary>
+    public bool AutoGain { get; set; } = true;
+    /// <summary>Fixed tuner gain in dB, used when <see cref="AutoGain"/> is off.</summary>
     public double? GainDb { get; set; } = 16.6;
     public List<Preset?> Presets { get; set; } = new();
     /// <summary>Index into the faceplate's illumination colors.</summary>

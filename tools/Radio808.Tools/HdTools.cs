@@ -99,6 +99,47 @@ internal static class HdTools
         return 0;
     }
 
+    /// <summary>
+    /// For each tuner gain: pilot SNR, envelope ripple, ADC clipping, and HD MER (full chain, muted), to see which fast
+    /// metric peaks where HD quality does.
+    /// </summary>
+    public static int GainSweep(double mhz, double settle, double measure)
+    {
+        using var radio = RadioEngine.StartAsync((long)Math.Round(mhz * 1e6)).GetAwaiter().GetResult();
+        radio.Muted = true;
+        long clipped = 0, samples = 0;
+        bool count = false;
+        radio.Device.Samples += iq =>
+        {
+            if (!count) return;
+            for (int i = 0; i < iq.Length; i++) if (Math.Abs(iq[i]) > 0.98f) clipped++;
+            samples += iq.Length;
+        };
+        Console.WriteLine($"{mhz:F1} MHz: waiting for HD...");
+        for (int i = 0; i < 30 && !radio.Hd.Synced; i++) Thread.Sleep(500);
+        var gains = ((Radio808.Core.Devices.RtlSdrDevice)radio.Device).Gains;
+        Console.WriteLine("  gain  pilotSNR  ripple   clip%    MER   (HD sync)");
+        foreach (var g in gains)
+        {
+            if (g < 5 || g > 45) continue;
+            radio.Gain = g;
+            Thread.Sleep(TimeSpan.FromSeconds(settle));
+            clipped = samples = 0; count = true;
+            double snr = 0, rip = 0, mer = 0; int n = 0, merN = 0, syncN = 0;
+            var sw = Stopwatch.StartNew();
+            while (sw.Elapsed.TotalSeconds < measure)
+            {
+                Thread.Sleep(250);
+                var st = radio.Receiver.Stereo; var hd = radio.Hd;
+                snr += st.PilotLocked ? st.PilotSnrDb : 0; rip += radio.Receiver.Equalizer.Ripple; n++;
+                if (hd.Synced) { syncN++; if (hd.MerLower > 0) { mer += (hd.MerLower + hd.MerUpper) / 2; merN++; } }
+            }
+            count = false;
+            Console.WriteLine($"{g,6:F1} {snr / n,9:F1} {rip / n,7:F3} {100.0 * clipped / Math.Max(1, samples),7:F3} {(merN > 0 ? (mer / merN).ToString("F1") : "  -"),6}   {syncN}/{n}");
+        }
+        return 0;
+    }
+
     /// <summary>Live radio through the default audio device, with keyboard controls.</summary>
     public static int Play(double mhz, double? gainDb, double seconds = 0)
     {
@@ -141,6 +182,8 @@ internal static class HdTools
             if (quit.IsSet) break;
             var s = radio.Hd; var b = radio.Blender; var st = radio.Receiver.Stereo;
             string programs = string.Join(",", System.Linq.Enumerable.Select(s.Programs.Keys, p => p == radio.Program ? $"[HD{p + 1}]" : $"HD{p + 1}"));
+            var opt = radio.GainOptimizer;
+            Console.Write($"[gain {radio.CurrentGainDb,4:F1}{(radio.AutoGain ? $" {opt.State,-9} {opt.Metric,-9} {opt.LastScore,5:F1}" : " fixed")} clip {opt.Clipping * 100,5:F2}%] ");
             Console.WriteLine($"{sw.Elapsed.TotalSeconds,4:F0}s {radio.Frequency / 1e6,5:F1} " +
                 $"{(b.PlayingHd ? "HD    " : radio.ForceAnalog ? "ANALOG" : "analog")} " +
                 $"{(s.Synced ? $"MER {(s.MerLower + s.MerUpper) / 2,4:F1}" : "no HD   ")} {programs,-24} " +

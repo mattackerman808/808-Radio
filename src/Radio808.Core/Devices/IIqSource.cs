@@ -15,6 +15,8 @@ public interface IIqSource : IDisposable
     long Frequency { get; set; }
     /// <summary>Tuner gain in dB, or null for automatic.</summary>
     double? Gain { get; set; }
+    /// <summary>Gain steps the tuner supports (dB, ascending); empty if not adjustable.</summary>
+    System.Collections.Generic.IReadOnlyList<double> Gains { get; }
     void Start();
     void Stop();
 }
