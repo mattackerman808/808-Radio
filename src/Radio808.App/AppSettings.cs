@@ -34,6 +34,10 @@ public sealed class AppSettings
     public bool AutoPpm { get; set; } = true;
     /// <summary>Antenna power through the coax (only for powered antennas / LNAs).</summary>
     public bool BiasTee { get; set; }
+    /// <summary>Use a dongle on another machine (rtl_tcp at <see cref="RtlTcpAddress"/>) instead of a USB one.</summary>
+    public bool UseRtlTcp { get; set; }
+    /// <summary>The rtl_tcp server: "host" or "host:port" (default port 1234).</summary>
+    public string? RtlTcpAddress { get; set; }
     public List<Preset?> Presets { get; set; } = new();
     /// <summary>Index into the faceplate's illumination colors.</summary>
     public int Illumination { get; set; }

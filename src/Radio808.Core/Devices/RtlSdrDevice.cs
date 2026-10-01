@@ -27,8 +27,7 @@ public sealed unsafe class RtlSdrDevice : IIqSource
     private Thread? _thread;
     private RtlSdrNative.ReadAsyncCallback? _callback;   // kept alive while streaming
     private float[] _iq = new float[BufferBytes];
-    private readonly float[] _lut = new float[256];
-    private float _dcI, _dcQ;
+    private readonly Cu8Converter _cu8 = new();
     private volatile bool _running;
 
     public event IqHandler? Samples;
@@ -67,7 +66,6 @@ public sealed unsafe class RtlSdrDevice : IIqSource
         var gains = new int[Math.Max(count, 0)];
         fixed (int* g = gains) RtlSdrNative.rtlsdr_get_tuner_gains(_dev, g);
         Gains = Array.ConvertAll(gains, g => g / 10.0);
-        for (int i = 0; i < 256; i++) _lut[i] = (i - 127.4f) / 128f;
         RtlSdrNative.rtlsdr_set_agc_mode(_dev, 0);
         // Setting the sample rate re-applies the current frequency, which is 0 Hz straight after open. Start in the FM
         // band so the tuner is never programmed with a meaningless frequency.
@@ -178,16 +176,7 @@ public sealed unsafe class RtlSdrDevice : IIqSource
         if (!_running) return;
         int n = (int)len & ~1;
         if (_iq.Length < n) _iq = new float[n];
-        // 8-bit unsigned -> float, with a slow DC blocker (removes the RTL's center spike)
-        float dcI = _dcI, dcQ = _dcQ;
-        const float a = 1e-5f;
-        for (int i = 0; i < n; i += 2)
-        {
-            float x = _lut[buf[i]], y = _lut[buf[i + 1]];
-            dcI += a * (x - dcI); dcQ += a * (y - dcQ);
-            _iq[i] = x - dcI; _iq[i + 1] = y - dcQ;
-        }
-        _dcI = dcI; _dcQ = dcQ;
+        _cu8.Convert(new ReadOnlySpan<byte>(buf, n), _iq);
         SamplesDelivered += n / 2;
         try { Samples?.Invoke(new ReadOnlySpan<float>(_iq, 0, n)); }
         catch (Exception) { /* a consumer bug must not kill the USB thread */ }

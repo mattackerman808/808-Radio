@@ -86,7 +86,11 @@ public sealed class GainOptimizer : IDisposable
         _idx = Math.Clamp(idx, 0, _gains.Count - 1);
         _e.ApplyGain(_gains[_idx]);
         _e.TakeClipFraction();   // measurements start fresh at the new gain
+        // a network dongle's samples from before the change are still arriving for a while: don't judge by them
+        _settleUntil = DateTime.UtcNow + _e.Device.ControlLatency;
     }
+
+    private DateTime _settleUntil;
 
     // ------------------------------------------------------------------ the loop
 
@@ -126,8 +130,9 @@ public sealed class GainOptimizer : IDisposable
         {
             await Task.Delay(100, ct);
             double clip = _e.TakeClipFraction();
-            _clipRecent += 0.3 * (clip - _clipRecent);
             if (!_enabled || _e.IsSeeking || _e.RetuneGeneration != _gen) return false;
+            if (DateTime.UtcNow < _settleUntil) continue;
+            _clipRecent += 0.3 * (clip - _clipRecent);
             if (clip > ClipHigh && _idx > 0)
             {
                 SetCeiling(_idx);
@@ -235,7 +240,7 @@ public sealed class GainOptimizer : IDisposable
     /// <summary>ADC clipping at the current gain: 100 ms to settle, then 450 ms measured. NaN if the station changed.</summary>
     private async Task<double> MeasureClip(CancellationToken ct)
     {
-        await Task.Delay(100, ct);
+        await Task.Delay(TimeSpan.FromMilliseconds(100) + _e.Device.ControlLatency, ct);
         _e.TakeClipFraction();
         await Task.Delay(450, ct);   // long enough that a quiet moment in the music doesn't hide the peaks
         if (!_enabled || _e.IsSeeking || _e.RetuneGeneration != _gen) return double.NaN;

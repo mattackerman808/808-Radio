@@ -42,8 +42,11 @@ public sealed class RadioController : IDisposable
         try
         {
             double? gain = Settings.AutoGain ? null : Settings.GainDb ?? RadioEngine.DefaultGainDb;
+            string? net = Networked ? Settings.RtlTcpAddress : null;
             var engine = ReplayDirectory != null
                 ? await Task.Run(() => RadioEngine.StartAsync(new Radio808.Core.Devices.ReplaySource(ReplayDirectory), Frequency, gain))
+                : net != null
+                ? await Task.Run(() => RadioEngine.StartAsync(new Radio808.Core.Devices.RtlTcpSource(net), Frequency, gain))
                 : await Task.Run(() => RadioEngine.StartAsync(Frequency, null, gain));
             engine.Volume = Settings.Volume * Settings.Volume;
             engine.Muted = Settings.Muted;
@@ -62,12 +65,39 @@ public sealed class RadioController : IDisposable
         catch (Exception ex)
         {
             Error = Friendly(ex);
+            if (Networked) { Error += " Retrying…"; RetryLater(); }
         }
         finally
         {
             Starting = false;
             Changed?.Invoke();
         }
+    }
+
+    /// <summary>Using a network dongle (rtl_tcp) rather than a USB one.</summary>
+    public bool Networked => ReplayDirectory == null && Settings.UseRtlTcp && !string.IsNullOrWhiteSpace(Settings.RtlTcpAddress);
+
+    private bool _retryPending, _disposed;
+
+    /// <summary>A network dongle comes back by itself (Pi rebooted, Wi-Fi blip): keep trying every few seconds.</summary>
+    private async void RetryLater()
+    {
+        if (_retryPending) return;
+        _retryPending = true;
+        await Task.Delay(2000);   // (a connection attempt to a host that's down adds up to 5 s more)
+        _retryPending = false;
+        if (!_disposed && Engine == null && !Starting && Networked) await StartAsync();
+    }
+
+    /// <summary>Switches between the USB dongle (address null) and an rtl_tcp server, and restarts the radio.</summary>
+    public async void SetSource(string? rtlTcpAddress)
+    {
+        Settings.UseRtlTcp = rtlTcpAddress != null;
+        if (rtlTcpAddress != null) Settings.RtlTcpAddress = rtlTcpAddress.Trim();
+        Settings.Save();
+        StopEngine();
+        _ppmDone = false; _ppmRounds = 0;   // a different dongle has its own crystal error
+        await StartAsync();
     }
 
     private static string Friendly(Exception ex)
@@ -82,7 +112,8 @@ public sealed class RadioController : IDisposable
     private void OnDeviceStopped(string msg)
     {
         StopEngine();
-        Error = msg + " Click to reconnect.";
+        if (Networked) { Error = msg + " Reconnecting…"; RetryLater(); }
+        else Error = msg + " Click to reconnect.";
         Changed?.Invoke();
     }
 
@@ -263,6 +294,7 @@ public sealed class RadioController : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         Settings.FrequencyMhz = Frequency / 1e6;
         Settings.Save();
         StopEngine();

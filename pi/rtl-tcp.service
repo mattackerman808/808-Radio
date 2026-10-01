@@ -1,0 +1,26 @@
+# rtl_tcp for 808 Radio: serves the RTL-SDR on this machine to the network on port 1234.
+# Installed by install-rtl-tcp.sh as /etc/systemd/system/rtl-tcp.service.
+[Unit]
+Description=RTL-SDR I/Q server (rtl_tcp) for 808 Radio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# -a ::        listen on every address (IPv4 and IPv6)
+# -n 24        keep at most ~2 s of samples for a slow client (the default, 500 buffers, is 45 s of lag)
+# 808 Radio sets the frequency, sample rate, gain, frequency correction and antenna power itself.
+ExecStart=/usr/bin/rtl_tcp -a :: -p 1234 -n 24 -f 98500000 -s 1488375
+Restart=always
+RestartSec=3
+# rtl_tcp often doesn't exit on SIGTERM while a client is connected; don't wait the default 90 s
+TimeoutStopSec=3
+DynamicUser=yes
+SupplementaryGroups=plugdev
+Nice=-5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

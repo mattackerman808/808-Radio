@@ -10,6 +10,12 @@ QUICK START
 
 Only one program can use the dongle at a time: close SDR# or other SDR software first.
 
+NETWORK DONGLE
+The dongle can also be on a Raspberry Pi (or other Linux machine) near the antenna, running rtl_tcp.
+Setup on the Pi: https://github.com/mattackerman808/808-Radio/blob/main/docs/raspberry-pi.md
+Then right-click > Source > Network dongle (rtl_tcp), and enter the Pi's name or address.
+It needs about 24 Mbit/s: wired Ethernet, or good 5 GHz Wi-Fi.
+
 USING IT
 - Drag the faceplate to move it; drag its edges to resize.
 - Volume: drag or scroll the knob (click it to mute). Tune: scroll over the display, or the arrow keys.

@@ -23,7 +23,7 @@ public sealed class RadioEngine : IDisposable
     /// </summary>
     public const double SeekRippleThreshold = 0.42;
     private const int SpectrumSize = 4096;
-    private const int RetuneSkipBlocks = 8;   // ~180 ms of samples still queued in USB buffers from the old station
+    private const double RetuneSkipSeconds = 0.176;   // samples still queued in USB buffers from the old station
 
     private readonly IIqSource _dev;
     private readonly FmReceiver _rx;
@@ -190,7 +190,7 @@ public sealed class RadioEngine : IDisposable
                 if (f > LastChannel) f = FirstChannel;
                 if (f < FirstChannel) f = LastChannel;
                 Frequency = f;
-                await Task.Delay(330, ct).ConfigureAwait(false);   // retune skip + equalizer settling
+                await Task.Delay(TimeSpan.FromMilliseconds(330) + _dev.ControlLatency, ct).ConfigureAwait(false);   // retune skip + equalizer settling
                 _rx.Equalizer.TakeEnvelopeRipple();
                 await Task.Delay(180, ct).ConfigureAwait(false);
                 double ripple = _rx.Equalizer.TakeEnvelopeRipple();
@@ -357,13 +357,13 @@ public sealed class RadioEngine : IDisposable
         if (gen != _appliedGeneration)
         {
             _appliedGeneration = gen;
-            _skip = RetuneSkipBlocks;
+            _skip = (int)((RetuneSkipSeconds + _dev.ControlLatency.TotalSeconds) * FmReceiver.DeviceRate);   // complex samples
             _rx.Reset();
             _hd.Retune();
         }
         if (_skip > 0)
         {
-            _skip--;
+            _skip -= iq.Length / 2;
             return;
         }
         // ADC clipping: the 8-bit converter saturates at +-1.0 (the DC blocker can shift that by a hair)

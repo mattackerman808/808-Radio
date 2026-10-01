@@ -33,6 +33,7 @@ internal static class Program
                 case "fmplay": return FmTools.Play(Mhz(args, 1, 97.3), args.Length > 2 ? double.Parse(args[2]) : 16.6, args.Length > 3 ? double.Parse(args[3]) : 0);
                 case "play": return HdTools.Play(Mhz(args, 1, 97.3), args.Length > 2 && args[2] != "auto" ? double.Parse(args[2]) : null, args.Length > 3 ? double.Parse(args[3]) : 0);
                 case "hd": return HdTools.Offline(args[1], args[2]);
+                case "netlatency": return NetTools.Latency(args[1], Mhz(args, 2, 98.5));
                 case "icon": return IconTool.Run(args[1]);
                 case "ppmtest": return HdTools.PpmTest(Mhz(args, 1, 98.5));
                 case "ctlstress": return HdTools.ControlStress(args.Length > 1 ? double.Parse(args[1]) : 20);

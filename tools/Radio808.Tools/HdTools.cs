@@ -193,7 +193,12 @@ internal static class HdTools
     /// <summary>Live radio through the default audio device, with keyboard controls.</summary>
     public static int Play(double mhz, double? gainDb, double seconds = 0)
     {
-        using var radio = RadioEngine.StartAsync((long)Math.Round(mhz * 1e6), null, gainDb).GetAwaiter().GetResult();
+        // R808_RTLTCP=host[:port]: a network dongle instead of a local one
+        var net = Environment.GetEnvironmentVariable("R808_RTLTCP");
+        using var radio = (net is { Length: > 0 }
+            ? RadioEngine.StartAsync(new Radio808.Core.Devices.RtlTcpSource(net), (long)Math.Round(mhz * 1e6), gainDb)
+            : RadioEngine.StartAsync((long)Math.Round(mhz * 1e6), null, gainDb)).GetAwaiter().GetResult();
+        if (net is { Length: > 0 }) Console.WriteLine($"source: {radio.Device.Name}");
         string? stopped = null;
         radio.DeviceStopped += m => stopped = m;
         Console.WriteLine($"playing {mhz:F1} MHz.  Keys: Left/Right tune 0.2 MHz, 1-8 HD program, A analog only, E equalizer, M mono, Q quit");
@@ -241,7 +246,8 @@ internal static class HdTools
                 $"| pilot {st.PilotSnrDb,4:F1} blend {st.Blend:F2}{(radio.Equalizer ? "" : " EQoff")}{(radio.ForceMono ? " MONO" : "")} " +
                 (s.StationName != null ? $"| {s.StationName} {s.Title}{(s.Artist != null ? " - " + s.Artist : "")}"
                     : $"| RDS {radio.Receiver.Rds.CallSign} [{radio.Receiver.Rds.ProgramService}] {radio.Receiver.Rds.RadioText}") +
-                (radio.HdDecoder.DroppedBlocks > 0 ? $" | dropped {radio.HdDecoder.DroppedBlocks}" : ""));
+                (radio.HdDecoder.DroppedBlocks > 0 ? $" | dropped {radio.HdDecoder.DroppedBlocks}" : "") +
+                (radio.Device.LinkStatus is string link ? $" | link {link}" : ""));
         }
         if (stopped != null) Console.WriteLine(stopped);
         return 0;

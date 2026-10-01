@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Network dongle**: use an RTL-SDR on another machine (e.g. a Raspberry Pi by the antenna) through the standard
+  `rtl_tcp` server: right-click → Source → Network dongle. Gain, frequency correction and antenna power work over the
+  network; the stream is drained continuously so the radio stays live, retunes and the automatic gain allow for the
+  link's latency, and the connection is re-established by itself after a reboot or network drop.
+- `pi/install-rtl-tcp.sh`: one-line setup of rtl_tcp as a service on a Pi; guide in `docs/raspberry-pi.md`.
+- Instrument panel: **Link** line (data rate, queue, drops) for a network dongle.
+- Tools: `netlatency`; `play` can use rtl_tcp (`R808_RTLTCP=host`).
+
 ## 0.1.0 (2026-09-30)
 
 First release.

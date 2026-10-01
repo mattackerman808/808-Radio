@@ -229,6 +229,37 @@ internal sealed class MainForm : Form
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
+    /// <summary>Asks for an rtl_tcp server address. Null if cancelled.</summary>
+    private string? AskAddress(string current)
+    {
+        using var f = new Form
+        {
+            Text = "Network dongle", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false,
+            StartPosition = FormStartPosition.CenterParent, AutoScaleMode = AutoScaleMode.Dpi, AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(12), ShowInTaskbar = false, TopMost = TopMost,
+        };
+        var layout = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, Dock = DockStyle.Fill };
+        layout.Controls.Add(new Label
+        {
+            AutoSize = true, MaximumSize = new Size(420, 0), Margin = new Padding(0, 0, 0, 8),
+            Text = "Address of the computer running rtl_tcp with the dongle, e.g. a Raspberry Pi: a host name or IP " +
+                   "address, optionally with :port (default 1234).\n\nOn the Pi, the setup script in the 808 Radio repo " +
+                   "(pi/install-rtl-tcp.sh) installs and starts rtl_tcp.",
+        });
+        var box = new TextBox { Text = current, Width = 420, Margin = new Padding(0, 0, 0, 10) };
+        layout.Controls.Add(box);
+        var buttons = new FlowLayoutPanel { FlowDirection = FlowDirection.RightToLeft, AutoSize = true, Dock = DockStyle.Fill, Margin = Padding.Empty };
+        var ok = new Button { Text = "Connect", DialogResult = DialogResult.OK, AutoSize = true };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true };
+        buttons.Controls.Add(cancel);
+        buttons.Controls.Add(ok);
+        layout.Controls.Add(buttons);
+        f.Controls.Add(layout);
+        f.AcceptButton = ok;
+        f.CancelButton = cancel;
+        return f.ShowDialog(this) == DialogResult.OK && !string.IsNullOrWhiteSpace(box.Text) ? box.Text.Trim() : null;
+    }
+
     /// <summary>Right-click menu: the settings that don't deserve a key on the faceplate.</summary>
     private ContextMenuStrip BuildMenu()
     {
@@ -255,6 +286,20 @@ internal sealed class MainForm : Form
         m.Items.Add(disp);
         m.Items.Add(new ToolStripMenuItem(_view.IsOpen ? "Close faceplate" : "Open faceplate (signal details)", null, (_, _) => _view.ToggleOpen()));
         m.Items.Add(new ToolStripSeparator());
+        var src = new ToolStripMenuItem("Source");
+        src.DropDownItems.Add(new ToolStripMenuItem("USB dongle", null, (_, _) => { if (_c.Settings.UseRtlTcp) _c.SetSource(null); })
+            { Checked = !_c.Settings.UseRtlTcp });
+        if (!string.IsNullOrWhiteSpace(_c.Settings.RtlTcpAddress))
+            src.DropDownItems.Add(new ToolStripMenuItem($"Network: {_c.Settings.RtlTcpAddress}", null, (_, _) =>
+            {
+                if (!_c.Settings.UseRtlTcp) _c.SetSource(_c.Settings.RtlTcpAddress);
+            }) { Checked = _c.Settings.UseRtlTcp });
+        src.DropDownItems.Add(new ToolStripMenuItem("Network dongle (rtl_tcp)…", null, (_, _) =>
+        {
+            var addr = AskAddress(_c.Settings.RtlTcpAddress ?? "");
+            if (addr != null) _c.SetSource(addr);
+        }));
+        m.Items.Add(src);
         m.Items.Add(new ToolStripMenuItem("Auto HD", null, (_, _) => _c.SetForceAnalog(!_c.Settings.ForceAnalog)) { Checked = !_c.Settings.ForceAnalog });
         m.Items.Add(new ToolStripMenuItem("Multipath equalizer", null, (_, _) => _c.SetEqualizer(!_c.Settings.Equalizer)) { Checked = _c.Settings.Equalizer });
         m.Items.Add(new ToolStripMenuItem("Force mono", null, (_, _) => _c.SetForceMono(!_c.Settings.ForceMono)) { Checked = _c.Settings.ForceMono });

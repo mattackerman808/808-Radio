@@ -30,6 +30,10 @@ anywhere and run `808Radio.exe`. It's self-contained: no installer, no .NET inst
 - An FM antenna. Only one program can use the dongle at a time, so close SDR# etc. first.
 - Windows 10 or 11, x64.
 
+**Or a network dongle:** plug the dongle into a Raspberry Pi near the antenna, run the standard `rtl_tcp` server there
+(one-line setup script), and choose *Source → Network dongle* in 808 Radio. See
+[docs/raspberry-pi.md](docs/raspberry-pi.md). It needs about 24 Mbit/s: Ethernet, or good 5 GHz Wi-Fi.
+
 HD Radio is broadcast in North America (and a few other places); the analog radio, RDS and the instrument panel work
 anywhere, though the tuning grid, de-emphasis and program types are US defaults for now.
 
@@ -46,7 +50,7 @@ anywhere, though the tuning grid, de-emphasis and program types are US defaults 
 | **DISP** | now playing / station name / frequency (D) |
 | **Bulb key** | illumination color (C): cyan, amber, green, red, blue, white |
 | **▲** | flip the faceplate down to the instrument panel (O) |
-| **Right-click** | gain, frequency correction, antenna power (bias-tee), always on top, … |
+| **Right-click** | source (USB or network dongle), gain, frequency correction, antenna power (bias-tee), always on top, … |
 
 Drag the faceplate to move it; drag its edges to resize. The display shows **HD** (outlined: HD found; filled: playing
 HD), **DGTL** (you're hearing the digital audio), **ST** (stereo), **RDS**, and **P1–P6** when on a preset. The slot on
@@ -122,6 +126,7 @@ For development, `dotnet build src/Radio808.App -c Release` after the native lib
 | `play <MHz> [gain\|auto]` | the radio in a console, with live stats |
 | `selftest [CNR] [echo dB] [echo µs]` | synthetic stereo broadcast through the receiver |
 | `gainsweep`, `gaintest`, `ppmtest`, `ctlstress` | gain, frequency-correction and control-path tests |
+| `netlatency <host[:port]> [MHz]` | an rtl_tcp link's throughput, drops and command latency (`play` uses rtl_tcp when `R808_RTLTCP=host` is set) |
 
 ## Credits
 

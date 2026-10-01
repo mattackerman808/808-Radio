@@ -21,6 +21,13 @@ public interface IIqSource : IDisposable
     int Ppm { get; set; }
     /// <summary>Power on the antenna input (for powered antennas / LNAs), if the hardware has it.</summary>
     bool BiasTee { get; set; }
+    /// <summary>
+    /// How long after a control change (tune, gain) samples can still predate it, beyond a local dongle's own
+    /// buffering: e.g. the network and server buffers of an rtl_tcp connection.
+    /// </summary>
+    TimeSpan ControlLatency => TimeSpan.Zero;
+    /// <summary>A one-line status of the link to the hardware (for a network source), or null.</summary>
+    string? LinkStatus => null;
     void Start();
     void Stop();
 }
