@@ -130,8 +130,13 @@ internal static class HdTools
                 }
             }) { IsBackground = true }.Start();
         var sw = Stopwatch.StartNew();
+        // R808_TOUR="98.5,92.3": unattended test, retunes through the list every 10 s
+        var tour = Environment.GetEnvironmentVariable("R808_TOUR")?.Split(',');
+        int tourIdx = 0;
         while (!quit.IsSet && stopped == null && (seconds <= 0 || sw.Elapsed.TotalSeconds < seconds))
         {
+            if (tour != null && tourIdx < tour.Length && sw.Elapsed.TotalSeconds >= 10 * (tourIdx + 1))
+                radio.Frequency = (long)Math.Round(double.Parse(tour[tourIdx++]) * 1e6);
             wake.WaitOne(2000);
             if (quit.IsSet) break;
             var s = radio.Hd; var b = radio.Blender; var st = radio.Receiver.Stereo;
@@ -141,7 +146,8 @@ internal static class HdTools
                 $"{(s.Synced ? $"MER {(s.MerLower + s.MerUpper) / 2,4:F1}" : "no HD   ")} {programs,-24} " +
                 $"lead {b.HdLeadSeconds,5:F2} " + (b.RetryIn > 0 ? $"retry {b.RetryIn:F0}s " : "") +
                 $"| pilot {st.PilotSnrDb,4:F1} blend {st.Blend:F2}{(radio.Equalizer ? "" : " EQoff")}{(radio.ForceMono ? " MONO" : "")} " +
-                $"| {s.StationName} {s.Title}{(s.Artist != null ? " - " + s.Artist : "")}" +
+                (s.StationName != null ? $"| {s.StationName} {s.Title}{(s.Artist != null ? " - " + s.Artist : "")}"
+                    : $"| RDS {radio.Receiver.Rds.CallSign} [{radio.Receiver.Rds.ProgramService}] {radio.Receiver.Rds.RadioText}") +
                 (radio.HdDecoder.DroppedBlocks > 0 ? $" | dropped {radio.HdDecoder.DroppedBlocks}" : ""));
         }
         if (stopped != null) Console.WriteLine(stopped);

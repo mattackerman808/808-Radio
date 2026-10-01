@@ -58,6 +58,7 @@ public sealed unsafe class HdBlender
     // Alignment: output time at which the analog played HD frame 0's content.
     private double _t0 = double.NaN;   // output time when HD frame 0 arrived
     private double _align = double.NaN;
+    private double _candidate = double.NaN;   // first estimate awaiting confirmation
     private double _alignScore;
     private bool _correlating;
     private double _nextCorrelate;
@@ -188,6 +189,7 @@ public sealed unsafe class HdBlender
         _readPos = 0;
         _t0 = double.NaN;
         _align = double.NaN;
+        _candidate = double.NaN;
         _alignScore = 0;
         _nextCorrelate = 0;
         _session++;
@@ -337,6 +339,14 @@ public sealed unsafe class HdBlender
             {
                 _correlating = false;
                 if (session != _session || double.IsNaN(align)) return;
+                if (!Aligned)
+                {
+                    // First lock: two consecutive estimates (2 s apart, with more data) must agree within 30 ms.
+                    // With only a few seconds of envelope a false peak can win; it rarely wins twice in the same place.
+                    bool confirmed = !double.IsNaN(_candidate) && Math.Abs(align - _candidate) < 0.03;
+                    _candidate = align;
+                    if (!confirmed) return;
+                }
                 // accept a new estimate; while HD is audible the servo slews to it
                 if (!Aligned || Math.Abs(align - _align) < 0.03 || score > _alignScore + 0.05 || score > 0.7)
                 {
@@ -354,7 +364,10 @@ public sealed unsafe class HdBlender
     internal static double Correlate(float[] aEnv, long aLast, float[] hEnv, long hLast, double t0, out double score)
     {
         score = 0;
-        long kMin = (long)((t0 - 3) * EnvRate), kMax = (long)((t0 + 14) * EnvRate);
+        // Only HD that arrives ahead of the analog can be played in step with it (we can't delay the analog), so
+        // search leads of +0.25..14 s. (Measured: ~2.5 s on every station.) Excluding negative leads removes a class
+        // of false peaks early on, which would otherwise hold HD off until the next correlation 20 s later.
+        long kMin = (long)((t0 + 0.25) * EnvRate), kMax = (long)((t0 + 14) * EnvRate);
         long hFirst = Math.Max(0, hLast - EnvRing + 1), aFirst = Math.Max(0, aLast - EnvRing + 1);
         var scores = new double[kMax - kMin + 1];
         double best = -2; long bestK = -1;

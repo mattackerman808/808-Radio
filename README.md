@@ -5,8 +5,8 @@ Car-radio style: tune, seek, presets, HD1–HD8, now-playing with album art.
 
 Sister project of [808 HD](https://github.com/mattackerman808/808-HD), the HD Radio plugin for SDR#.
 
-> Work in progress. Currently: FM stereo + HD Radio with automatic blending, playable from the command line
-> (`radio808-tools play 97.3`). Next: RDS, then the car-radio UI.
+> Work in progress. Currently: FM stereo, RDS, and HD Radio with automatic blending, playable from the command line
+> (`radio808-tools play 97.3`). Next: the car-radio UI.
 
 ## Hardware
 
@@ -72,6 +72,11 @@ Audio goes out through WASAPI shared mode and follows the Windows default device
 
 A blind constant-modulus equalizer on the FM channel removes multipath (FM has a constant envelope; reflections
 make it ripple).
+
+RDS: the 57 kHz subcarrier is mixed down, filtered, and resampled to exactly 16 samples per bit; a biphase matched
+filter is sampled at the highest-energy phase and bits come from differential detection (no carrier PLL, works on
+mono stations). Block sync uses the 10-bit checkwords (1–2 bit bursts corrected). Decoded: PI (→ US call sign),
+PS, RadioText, PTY (RBDS names), TP/TA.
 
 ## How HD works
 

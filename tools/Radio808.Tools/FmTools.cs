@@ -61,6 +61,10 @@ internal static class FmTools
         }
         double secs = data.Length / 2.0 / FmReceiver.DeviceRate;
         Console.WriteLine($"average from 3 s: pilot SNR {snrSum / Math.Max(1, snrN):F1} dB, envelope ripple {rippleSum / Math.Max(1, snrN):F3}");
+        var r = rx.Rds;
+        Console.WriteLine($"RDS: {(r.Synced ? "sync" : "no sync")}, groups {r.Groups} ({r.Groups / secs:F1}/s), block errors {r.BlockErrorRate:P0}, " +
+            $"PI {(r.Pi >= 0 ? r.Pi.ToString("X4") : "-")} {r.CallSign}, PTY {r.PtyName}, TP {r.TrafficProgram}");
+        Console.WriteLine($"     PS \"{r.ProgramService}\"  RT \"{r.RadioText}\"");
         double mid = (sumL + sumR + 2 * sumLR) / 4, side = Math.Max(0, (sumL + sumR - 2 * sumLR) / 4);
         Console.WriteLine($"audio {audioFrames / FmReceiver.AudioRate:F2} s of {secs:F2} s, peak {peak:F2}, rms L {Math.Sqrt(sumL / audioFrames):F3} R {Math.Sqrt(sumR / audioFrames):F3}, L/R correlation {sumLR / Math.Sqrt(sumL * sumR):F2}, side/mid {10 * Math.Log10(side / mid + 1e-12):F1} dB");
         Console.WriteLine($"cpu: {sw.Elapsed.TotalSeconds / secs * 100:F1}% of realtime (one core)");

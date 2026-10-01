@@ -29,6 +29,7 @@ public sealed class FmReceiver
     private readonly FirDecimator _hbI, _hbQ, _chI, _chQ, _mpxDec;
     private readonly StereoDecoder _stereo;
     private readonly CmaEqualizer _eq;
+    private readonly RdsDecoder _rds = new(MpxRate);
     private float[] _i = new float[0], _q = new float[0], _hi = new float[0], _hq = new float[0];
     private float[] _ci = new float[0], _cq = new float[0], _mpx = new float[0], _mpx2 = new float[0], _audio = new float[0];
     private float _prevI = 1, _prevQ;
@@ -58,6 +59,8 @@ public sealed class FmReceiver
     public StereoDecoder Stereo => _stereo;
     /// <summary>Multipath equalizer on the FM channel.</summary>
     public CmaEqualizer Equalizer => _eq;
+    /// <summary>RDS station data (analog).</summary>
+    public RdsStatus Rds => _rds.Status;
     /// <summary>Power in the FM channel, dBFS (smoothed).</summary>
     public double ChannelPowerDb => 10 * Math.Log10(_powerAvg);
 
@@ -98,6 +101,7 @@ public sealed class FmReceiver
         // MPX -> stereo audio
         Ensure(ref _mpx2, _mpxDec.MaxOutput(nc));
         int nm = _mpxDec.Process(_mpx.AsSpan(0, nc), _mpx2);
+        _rds.Process(_mpx2.AsSpan(0, nm));
         Ensure(ref _audio, 2 * _stereo.MaxOutputFrames(nm));
         int frames = _stereo.Process(_mpx2.AsSpan(0, nm), _audio);
         Audio?.Invoke(_audio.AsSpan(0, 2 * frames));
@@ -106,7 +110,7 @@ public sealed class FmReceiver
     /// <summary>Clears filter state, e.g. after retuning.</summary>
     public void Reset()
     {
-        _hbI.Reset(); _hbQ.Reset(); _chI.Reset(); _chQ.Reset(); _mpxDec.Reset(); _stereo.Reset(); _eq.Reset();
+        _hbI.Reset(); _hbQ.Reset(); _chI.Reset(); _chQ.Reset(); _mpxDec.Reset(); _stereo.Reset(); _eq.Reset(); _rds.Reset();
         _prevI = 1; _prevQ = 0; _powerAvg = 1e-9;
     }
 
