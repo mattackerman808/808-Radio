@@ -34,4 +34,4 @@ Frequency correction is measured automatically from FM stations.
 Settings are saved in %APPDATA%\808Radio\settings.json; errors are logged to 808Radio.log in the same folder.
 
 808 Radio is free software under the GNU GPL v3 or later (LICENSE.txt). It includes nrsc5, FAAD2, FFTW,
-librtlsdr, libusb, NAudio and .NET; see THIRD_PARTY_NOTICES.md. Not affiliated with Xperi (HD Radio).
+librtlsdr, libusb, NAudio, Vortice.Windows and .NET; see THIRD_PARTY_NOTICES.md. Not affiliated with Xperi (HD Radio).
