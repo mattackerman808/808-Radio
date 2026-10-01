@@ -105,6 +105,16 @@ public sealed class RadioEngine : IDisposable
     public HdBlender Blender => _blender;
     public AudioPlayer Player => _player;
     public HdStatus Hd => _hd.Status;
+
+    /// <summary>
+    /// The bit error rate above which HD is "found but too weak": the station name and program list (sent with heavy
+    /// error protection) still decode, but most audio frames fail, so the blender stays on analog. Good stations run at
+    /// 0.0002-0.001; 107.7 at MER 2-4 dB was at 0.1 (2026-10-01).
+    /// </summary>
+    public const float HdWeakBer = 0.01f;
+
+    /// <summary>HD is synced (name, programs) but too weak to play its audio.</summary>
+    public bool HdTooWeak => _hd.Status.Synced && _hd.Status.Ber > HdWeakBer && !_blender.PlayingHd;
     public HdDecoder HdDecoder => _hd;
 
     /// <summary>Station frequency in Hz. Setting it retunes immediately.</summary>

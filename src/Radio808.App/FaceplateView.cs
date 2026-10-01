@@ -720,6 +720,8 @@ internal sealed class FaceplateView : Control
             x = nx;
         }
         if (_c.Seeking) Indicator(g, x + 8, 172, "SEEK", true, true, lit);
+        else if (eng != null && !_c.Settings.ForceAnalog && eng.HdTooWeak)
+            Indicator(g, x + 8, 172, "HD WEAK", true, false, lit);   // found (name, programs), but too weak to play
         else if (eng != null && synced && !playingHd && !_c.Settings.ForceAnalog && eng.Blender.RetryIn > 0.5)
             Indicator(g, x + 8, 172, $"HD IN {eng.Blender.RetryIn:0}S", true, false, lit);
 

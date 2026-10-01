@@ -627,7 +627,8 @@ internal sealed class NerdPanel : IDisposable
             L("Sync", !hd.Synced ? "no" : hd.MerLower <= 0 && hd.MerUpper <= 0 ? "yes  MER measuring…" : $"yes  MER {hd.MerLower:0.0} / {hd.MerUpper:0.0} dB");
             L("BER", hd.Synced ? $"{hd.Ber:0.00000}" : "—");
             L("Programs", hd.Programs.Count == 0 ? "—" : string.Join(" ", hd.Programs.Select(kv => $"HD{kv.Key + 1}{(kv.Key == eng.Program ? "*" : "")}")));
-            L("Blend", (b.PlayingHd ? "HD" : "analog") + (b.Aligned ? $"  lead {b.HdLeadSeconds:0.000} s  score {b.AlignScore:0.00}" : "  not aligned"));
+            L("Blend", eng.HdTooWeak ? "analog · HD too weak to play"
+                : (b.PlayingHd ? "HD" : "analog") + (b.Aligned ? $"  lead {b.HdLeadSeconds:0.000} s  score {b.AlignScore:0.00}" : "  not aligned"));
             L("Loudness", $"HD gain {b.HdGain:0.00}" + (b.RetryIn > 0.5 ? $"  retry in {b.RetryIn:0} s" : ""));
             L("Data", hd.FilesReceived > 0 ? $"{hd.FilesReceived} files  {hd.LastFile}" : "—");
             H("AUDIO / CPU");
