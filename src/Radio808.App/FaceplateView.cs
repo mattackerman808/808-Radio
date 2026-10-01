@@ -687,9 +687,12 @@ internal sealed class FaceplateView : Control
 
         // line 2: a full-width small dot-matrix line: the big line's partner in the DISP combination (station "KLLC 97.3",
         // the song, the genre, ...), and the clock on the right
-        string clockText = DateTime.Now.ToString("H:mm").PadLeft(5);
-        var l2 = DotMatrix.Columns(new string(' ', Line2Cells - clockText.Length) + clockText);
-        DotMatrix.Draw(g, l2, 0, 292, 136, 3.1f, Line2Cells, lit, ghost, glow: false);   // ends ~776, left of the art square
+        // the info cells (ghost dots where empty), then a seven-segment clock at the right end, like a VFD's
+        DotMatrix.Draw(g, DotMatrix.Columns(""), 0, 292, 136, 3.1f, Line2Cells - 6, lit, ghost, glow: false);
+        string clockText = DateTime.Now.ToString("H:mm").PadLeft(5);   // " 9:41": a blank first digit shows as a ghost 8
+        const float clockH = 24.5f;
+        float clockW = 4 * SevenSegment.DigitWidth(clockH) + 3 * clockH * 0.16f + clockH * 0.24f;
+        SevenSegment.Draw(g, clockText, 776 - clockW, 136.5f, clockH, lit, ghost);
 
         _subCells = Line2Cells - 6;   // up to the clock
         string sub = SubText(eng, hd, rds, synced, mhz);
@@ -800,24 +803,19 @@ internal sealed class FaceplateView : Control
         float bw = sq.Width / Bars;
         int segs = 13;
         float sh = sq.Height / segs;
-        // colored by height like a graphic-EQ display: the illumination color, then amber, then red at the top (with a
-        // red or amber illumination the low segments are green, the classic EQ look, so the colors still climb)
-        bool warm = lit.R > lit.G && lit.R > lit.B;
-        using var low = new SolidBrush(warm ? Color.FromArgb(0x3C, 0xE0, 0x6A) : Color.FromArgb(225, lit));
-        using var mid = new SolidBrush(Color.FromArgb(0xFF, 0xC8, 0x30));
-        using var high = new SolidBrush(Alert);
-        using var peak = new SolidBrush(Color.FromArgb(240, 255, 255, 255));
+        // one color, the illumination, brightening toward the top for depth; the held peaks brightest
+        var rows = new SolidBrush[segs];
+        for (int s = 0; s < segs; s++) rows[s] = new SolidBrush(Color.FromArgb(120 + 120 * s / (segs - 1), lit));
+        using var peak = new SolidBrush(Color.FromArgb(255, Math.Min(255, lit.R + 70), Math.Min(255, lit.G + 70), Math.Min(255, lit.B + 70)));
         using var off = new SolidBrush(ghost);
         for (int b = 0; b < Bars; b++)
         {
             int litSegs = _specValid ? (int)Math.Round(_bars[b] * segs) : 0;
             int peakSeg = _specValid ? (int)Math.Round(_peaks[b] * segs) - 1 : -1;   // the held peak, above the bar
             for (int s = 0; s < segs; s++)
-            {
-                var on = s >= segs - 3 ? high : s >= segs - 6 ? mid : low;
-                g.FillRectangle(s < litSegs ? on : s == peakSeg ? peak : off, sq.X + b * bw + 1, sq.Bottom - (s + 1) * sh + 1, bw - 2, sh - 2);
-            }
+                g.FillRectangle(s < litSegs ? rows[s] : s == peakSeg ? peak : off, sq.X + b * bw + 1, sq.Bottom - (s + 1) * sh + 1, bw - 2, sh - 2);
         }
+        foreach (var r in rows) r.Dispose();
     }
 
     /// <summary>A frame that only moves the analyzer: repaint the glass under it and the bars, nothing else.</summary>
