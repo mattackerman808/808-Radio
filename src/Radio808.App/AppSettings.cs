@@ -31,6 +31,7 @@ public sealed class AppSettings
     public int Illumination { get; set; }
     /// <summary>Display mode: 0 = now playing, 1 = station name, 2 = frequency.</summary>
     public int DisplayMode { get; set; }
+    public bool AlwaysOnTop { get; set; }
     public int[]? WindowBounds { get; set; }
 
     private static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "808Radio");

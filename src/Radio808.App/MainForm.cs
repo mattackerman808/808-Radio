@@ -31,10 +31,23 @@ internal sealed class MainForm : Form
             Bounds = new Rectangle(b[0], b[1], b[2], b[3]);
         }
 
+        // no window frame: the faceplate is the window
+        FormBorderStyle = FormBorderStyle.None;
+        TopMost = _c.Settings.AlwaysOnTop;
+
         _view = new FaceplateView(_c) { Dock = DockStyle.Fill };
         _view.MapRequested += ShowMap;
         _view.MenuRequested += p => BuildMenu().Show(_view, p);
+        _view.DragRequested += () =>
+        {
+            ReleaseCapture();
+            SendMessage(Handle, WM_NCLBUTTONDOWN, (IntPtr)HTCAPTION, IntPtr.Zero);
+        };
+        _view.MinimizeRequested += () => WindowState = FormWindowState.Minimized;
+        _view.CloseRequested += Close;
+        _view.IsResizeBorder = p => EdgeHit(p) != 0;
         Controls.Add(_view);
+        Resize += (_, _) => UpdateShape();
 
         _c.Changed += () => _view.Invalidate();
         _timer.Tick += (_, _) =>
@@ -54,6 +67,91 @@ internal sealed class MainForm : Form
             _c.Settings.WindowBounds = new[] { r.X, r.Y, r.Width, r.Height };
             _c.Dispose();
         };
+    }
+
+    // ---- frameless window: shape, move, resize with a locked aspect ratio ----
+
+    private const int WM_NCLBUTTONDOWN = 0xA1, WM_NCHITTEST = 0x84, WM_SIZING = 0x214, HTCAPTION = 2;
+    private const float DesignW = 1000, DesignH = 300;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool ReleaseCapture();
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    private float FaceScale => ClientSize.Width / DesignW;
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.Style |= 0x20000;   // WS_MINIMIZEBOX: lets the taskbar minimize/restore a frameless window
+            return cp;
+        }
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        ClientSize = new Size(ClientSize.Width, (int)Math.Round(ClientSize.Width * DesignH / DesignW));   // exact faceplate shape
+        UpdateShape();
+    }
+
+    /// <summary>The window region follows the faceplate's rounded outline.</summary>
+    private void UpdateShape()
+    {
+        if (WindowState == FormWindowState.Minimized || ClientSize.Width == 0) return;
+        float s = FaceScale;
+        var o = FaceplateView.Outline;
+        using var path = FaceplateView.Rounded(new RectangleF(o.X * s, o.Y * s, o.Width * s, o.Height * s), FaceplateView.OutlineRadius * s);
+        var old = Region;
+        Region = new Region(path);
+        old?.Dispose();
+    }
+
+    /// <summary>Resize hit-test code for a client point on the faceplate's edge band, or 0.</summary>
+    private int EdgeHit(Point p)
+    {
+        float s = FaceScale, band = 9 * s;
+        var o = FaceplateView.Outline;
+        float l = o.Left * s, t = o.Top * s, r = o.Right * s, b = o.Bottom * s;
+        bool left = p.X < l + band, right = p.X > r - band, top = p.Y < t + band, bottom = p.Y > b - band;
+        if (top && left) return 13;
+        if (top && right) return 14;
+        if (bottom && left) return 16;
+        if (bottom && right) return 17;
+        if (left) return 10;
+        if (right) return 11;
+        if (top) return 12;
+        if (bottom) return 15;
+        return 0;
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WM_NCHITTEST)
+        {
+            var screen = new Point((short)((long)m.LParam & 0xFFFF), (short)(((long)m.LParam >> 16) & 0xFFFF));
+            int hit = EdgeHit(PointToClient(screen));
+            if (hit != 0) { m.Result = (IntPtr)hit; return; }
+        }
+        else if (m.Msg == WM_SIZING)
+        {
+            // keep the faceplate's proportions while the user drags an edge
+            var r = System.Runtime.InteropServices.Marshal.PtrToStructure<RECT>(m.LParam);
+            int edge = (int)m.WParam;   // 1 left, 2 right, 3 top, 4 top-left, 5 top-right, 6 bottom, 7 bottom-left, 8 bottom-right
+            int w = r.Right - r.Left, h = r.Bottom - r.Top;
+            if (edge is 3 or 6) w = (int)Math.Round(h * DesignW / DesignH);
+            else h = (int)Math.Round(w * DesignH / DesignW);
+            if (edge is 1 or 4 or 7) r.Left = r.Right - w; else r.Right = r.Left + w;
+            if (edge is 3 or 4 or 5) r.Top = r.Bottom - h; else r.Bottom = r.Top + h;
+            System.Runtime.InteropServices.Marshal.StructureToPtr(r, m.LParam, false);
+            m.Result = (IntPtr)1;
+            return;
+        }
+        base.WndProc(ref m);
     }
 
     private void UpdateTitle()
@@ -145,6 +243,14 @@ internal sealed class MainForm : Form
             { Checked = _c.Settings.GainDb == v });
         }
         m.Items.Add(gain);
+        m.Items.Add(new ToolStripSeparator());
+        m.Items.Add(new ToolStripMenuItem("Always on top", null, (_, _) =>
+        {
+            _c.Settings.AlwaysOnTop = !_c.Settings.AlwaysOnTop;
+            TopMost = _c.Settings.AlwaysOnTop;
+        }) { Checked = _c.Settings.AlwaysOnTop });
+        m.Items.Add(new ToolStripMenuItem("Minimize", null, (_, _) => WindowState = FormWindowState.Minimized));
+        m.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => Close()));
         m.Items.Add(new ToolStripSeparator());
         m.Items.Add(new ToolStripMenuItem("Keyboard shortcuts", null, (_, _) => MessageBox.Show(this,
             "← / →\tstep one channel\nCtrl+← / →\tseek (also media keys)\n1-6\tpreset (Ctrl+1-6 or hold to save)\n" +

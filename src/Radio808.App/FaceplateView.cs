@@ -65,6 +65,26 @@ internal sealed class FaceplateView : Control
 
     public event Action<string>? MapRequested;
     public event Action<Point>? MenuRequested;
+    /// <summary>The user pressed on bare faceplate: the window should start moving.</summary>
+    public event Action? DragRequested;
+    public event Action? MinimizeRequested, CloseRequested;
+    /// <summary>Asked for each mouse position: true if it's on the window's resize border.</summary>
+    public Func<Point, bool>? IsResizeBorder;
+
+    /// <summary>The faceplate's outline in design coordinates (the window's shape).</summary>
+    public static readonly RectangleF Outline = new(12, 14, 976, 272);
+    public const float OutlineRadius = 26;
+
+    protected override void WndProc(ref Message m)
+    {
+        const int WM_NCHITTEST = 0x84, HTTRANSPARENT = -1;
+        if (m.Msg == WM_NCHITTEST && IsResizeBorder != null)
+        {
+            var screen = new Point((short)((long)m.LParam & 0xFFFF), (short)(((long)m.LParam >> 16) & 0xFFFF));
+            if (IsResizeBorder(PointToClient(screen))) { m.Result = HTTRANSPARENT; return; }   // let the form resize
+        }
+        base.WndProc(ref m);
+    }
 
     public FaceplateView(RadioController c)
     {
@@ -160,8 +180,8 @@ internal sealed class FaceplateView : Control
 
     private void DrawBody(Graphics g)
     {
-        var outer = new RectangleF(12, 14, 976, 272);
-        using (var p = Rounded(outer, 26))
+        var outer = Outline;
+        using (var p = Rounded(outer, OutlineRadius))
         {
             using (var b = new LinearGradientBrush(outer, Body1, Body2, 90f)) g.FillPath(b, p);
             using var pen = new Pen(Color.FromArgb(0x48, 0x4E, 0x57), 1.5f);
@@ -178,7 +198,28 @@ internal sealed class FaceplateView : Control
         }
         // brand above the display, model name at the right
         BrandMark.Draw(g, 538, 32, 20, Silver);
-        Label(g, "HD-808", 9.5f, Grey, new RectangleF(820, 32, 92, 20), StringAlignment.Far);
+        Label(g, "HD-808", 9.5f, Grey, new RectangleF(800, 32, 92, 20), StringAlignment.Far);
+
+        // window keys (the window has no frame): minimize and close, top right
+        WindowKey(g, new RectangleF(926, 34, 18, 16), "min", () => MinimizeRequested?.Invoke(), close: false);
+        WindowKey(g, new RectangleF(948, 34, 18, 16), "close", () => CloseRequested?.Invoke(), close: true);
+    }
+
+    private void WindowKey(Graphics g, RectangleF r, string id, Action click, bool close)
+    {
+        bool hot = _hover == id;
+        using (var p = Rounded(r, 4))
+        {
+            using var b = new SolidBrush(hot ? (close ? Color.FromArgb(0xC4, 0x2B, 0x2B) : Color.FromArgb(0x3A, 0x40, 0x48)) : Color.FromArgb(0x16, 0x18, 0x1C));
+            g.FillPath(b, p);
+            using var pen = new Pen(Color.FromArgb(0x05, 0x05, 0x06), 1);
+            g.DrawPath(pen, p);
+        }
+        using var pen2 = new Pen(hot ? Color.White : Grey, 1.6f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        float cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2;
+        if (close) { g.DrawLine(pen2, cx - 3.5f, cy - 3.5f, cx + 3.5f, cy + 3.5f); g.DrawLine(pen2, cx + 3.5f, cy - 3.5f, cx - 3.5f, cy + 3.5f); }
+        else g.DrawLine(pen2, cx - 4, cy + 1, cx + 4, cy + 1);
+        _hits.Add(new Hit(r, id, click));
     }
 
     private void DrawLeftKeys(Graphics g)
@@ -570,7 +611,7 @@ internal sealed class FaceplateView : Control
         g.FillEllipse(b, cx - 6, cy - 12, 12, 12);
     }
 
-    private static GraphicsPath Rounded(RectangleF r, float radius)
+    internal static GraphicsPath Rounded(RectangleF r, float radius)
     {
         var p = new GraphicsPath();
         float d = radius * 2;
@@ -625,7 +666,8 @@ internal sealed class FaceplateView : Control
             MenuRequested?.Invoke(e.Location);
             return;
         }
-        if (e.Button != MouseButtons.Left || h == null) return;
+        if (e.Button != MouseButtons.Left) return;
+        if (h == null) { DragRequested?.Invoke(); return; }   // bare faceplate: move the window
         _pressed = h.Id;
         _holdFired = false;
         if (h.Id == "knob") { _knobDrag = true; _knobMoved = false; _knobStart = p; _knobStartVol = _c.Settings.Volume; }
