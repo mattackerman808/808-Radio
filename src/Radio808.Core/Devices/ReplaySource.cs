@@ -41,6 +41,8 @@ public sealed class ReplaySource : IIqSource
     public uint SampleRate { get; set; } = 1_488_375;
     public double? Gain { get; set; }
     public IReadOnlyList<double> Gains { get; } = Array.Empty<double>();
+    public int Ppm { get; set; }
+    public bool BiasTee { get; set; }
 
     public long Frequency
     {

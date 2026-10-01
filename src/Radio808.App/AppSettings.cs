@@ -28,6 +28,12 @@ public sealed class AppSettings
     public bool AutoGain { get; set; } = true;
     /// <summary>Fixed tuner gain in dB, used when <see cref="AutoGain"/> is off.</summary>
     public double? GainDb { get; set; } = 16.6;
+    /// <summary>Dongle frequency correction in ppm.</summary>
+    public int Ppm { get; set; }
+    /// <summary>Measure the correction from FM carriers and apply it when it's off by 1.5 ppm or more.</summary>
+    public bool AutoPpm { get; set; } = true;
+    /// <summary>Antenna power through the coax (only for powered antennas / LNAs).</summary>
+    public bool BiasTee { get; set; }
     public List<Preset?> Presets { get; set; } = new();
     /// <summary>Index into the faceplate's illumination colors.</summary>
     public int Illumination { get; set; }

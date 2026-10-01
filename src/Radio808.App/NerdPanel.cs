@@ -495,7 +495,9 @@ internal sealed class NerdPanel : IDisposable
             var rx = eng.Receiver; var st = rx.Stereo; var rds = rx.Rds; var hd = eng.Hd; var b = eng.Blender; var p = eng.Player;
             H("RF");
             L("Device", eng.Device.Name);
-            L("Tuning", $"{eng.Frequency / 1e6:0.000} MHz  @ {FmReceiver.DeviceRate / 1e6:0.000000} MS/s");
+            var perr = eng.MeasuredPpmError;
+            L("Tuning", $"{eng.Frequency / 1e6:0.000} MHz  corr {eng.Ppm:+0;-0;0} ppm" +
+                (perr is double pe ? $"  err {pe:+0.0;-0.0} ppm" : "") + (eng.BiasTee ? "  BIAS-T" : ""));
             var opt = eng.GainOptimizer;
             L("Gain", $"{eng.CurrentGainDb:0.0} dB  " + (eng.AutoGain
                 ? $"auto · {opt.State.ToString().ToLowerInvariant()}{(opt.Metric != "" ? " on " + opt.Metric : "")}"

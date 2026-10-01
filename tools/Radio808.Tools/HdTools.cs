@@ -140,6 +140,21 @@ internal static class HdTools
         return 0;
     }
 
+    /// <summary>Checks the carrier-offset PPM measurement: deliberately mis-set corrections should read back.</summary>
+    public static int PpmTest(double mhz)
+    {
+        using var radio = RadioEngine.StartAsync((long)Math.Round(mhz * 1e6), null, 16.6).GetAwaiter().GetResult();
+        radio.Muted = true;
+        foreach (int ppm in new[] { 0, 20, -20, 0 })
+        {
+            radio.Ppm = ppm;
+            Thread.Sleep(7000);
+            var rx = radio.Receiver;
+            Console.WriteLine($"ppm set {ppm,4}: carrier offset {rx.CarrierOffsetHz,8:+0.0;-0.0} Hz over {rx.CarrierOffsetSeconds:0.0} s -> measured error {(radio.MeasuredPpmError is double e ? e.ToString("+0.00;-0.00") : "n/a")} ppm   (HD {(radio.Hd.Synced ? "synced" : "-")})");
+        }
+        return 0;
+    }
+
     /// <summary>Hammers gain changes and retunes from two threads at once; counts failed control calls.</summary>
     public static int ControlStress(double seconds)
     {

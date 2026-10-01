@@ -51,6 +51,12 @@ public sealed class RadioController : IDisposable
             engine.Equalizer = Settings.Equalizer;
             engine.ForceMono = Settings.ForceMono;
             engine.DeviceStopped += msg => _ui.Post(_ => OnDeviceStopped(msg), null);
+            try
+            {
+                if (Settings.Ppm != 0) engine.Ppm = Settings.Ppm;
+                if (Settings.BiasTee) engine.BiasTee = true;
+            }
+            catch (Exception ex) { AppLog.Write(ex); }
             Engine = engine;
         }
         catch (Exception ex)
@@ -205,6 +211,54 @@ public sealed class RadioController : IDisposable
         if (db is not null) Settings.GainDb = db;
         if (Engine != null) Engine.Gain = db;
         Settings.Save();
+    }
+
+    // ---- frequency correction and antenna power ----
+
+    private bool _ppmDone;
+    private int _ppmRounds;
+
+    /// <summary>
+    /// Called about once a second. With auto-correction on, once a solid stereo station has been measured, applies the
+    /// dongle's frequency error if it's 1.5 ppm or more (up to 3 rounds per session, since the steps aren't exact).
+    /// </summary>
+    public void PpmTick()
+    {
+        var eng = Engine;
+        if (eng == null || !Settings.AutoPpm || _ppmDone || Seeking) return;
+        if (eng.MeasuredPpmError is not double err) return;
+        if (Math.Abs(err) < 1.5 || _ppmRounds >= 3) { _ppmDone = true; return; }
+        _ppmRounds++;
+        SetPpm(eng.Ppm + (int)Math.Round(err));
+        Message?.Invoke($"PPM {Settings.Ppm:+0;-0;0} CALIBRATED");
+    }
+
+    /// <summary>Measure again on the current station (from the menu).</summary>
+    public void CalibratePpmNow()
+    {
+        Settings.AutoPpm = true;
+        _ppmDone = false;
+        _ppmRounds = 0;
+        Engine?.Receiver.RestartCarrierOffset();
+        Message?.Invoke("CALIBRATING PPM");
+    }
+
+    public void SetPpm(int ppm)
+    {
+        Settings.Ppm = Math.Clamp(ppm, -200, 200);
+        try { if (Engine != null) Engine.Ppm = Settings.Ppm; }
+        catch (Exception ex) { AppLog.Write(ex); }
+        Settings.Save();
+        Changed?.Invoke();
+    }
+
+    public void SetBiasTee(bool on)
+    {
+        Settings.BiasTee = on;
+        try { if (Engine != null) Engine.BiasTee = on; }
+        catch (Exception ex) { AppLog.Write(ex); }
+        Settings.Save();
+        Message?.Invoke(on ? "ANTENNA POWER ON" : "ANTENNA POWER OFF");
     }
 
     public void Dispose()

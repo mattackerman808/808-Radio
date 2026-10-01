@@ -58,10 +58,12 @@ internal sealed class MainForm : Form
         _c.Changed += () => _view.Invalidate();
         _c.Message += m => _view.Flash(m, 2.5);
         Program.OnError = ex => _view.Flash("ERROR - SEE LOG", 2.5);
+        int ticks = 0;
         _timer.Tick += (_, _) =>
         {
             _view.Tick();
             UpdateTitle();
+            if (++ticks % 10 == 0) _c.PpmTick();
         };
         Load += async (_, _) =>
         {
@@ -258,6 +260,27 @@ internal sealed class MainForm : Form
             { Checked = !_c.Settings.AutoGain && _c.Settings.GainDb == v });
         }
         m.Items.Add(gain);
+        var ppm = new ToolStripMenuItem($"Frequency correction ({_c.Settings.Ppm:+0;-0;0} ppm)");
+        ppm.DropDownItems.Add(new ToolStripMenuItem("Automatic (measured from FM stations)", null, (_, _) =>
+        {
+            _c.Settings.AutoPpm = !_c.Settings.AutoPpm;
+            _c.Settings.Save();
+        }) { Checked = _c.Settings.AutoPpm });
+        ppm.DropDownItems.Add(new ToolStripMenuItem("Calibrate now on this station", null, (_, _) => _c.CalibratePpmNow()));
+        ppm.DropDownItems.Add(new ToolStripSeparator());
+        ppm.DropDownItems.Add(new ToolStripMenuItem("+1 ppm", null, (_, _) => _c.SetPpm(_c.Settings.Ppm + 1)));
+        ppm.DropDownItems.Add(new ToolStripMenuItem("−1 ppm", null, (_, _) => _c.SetPpm(_c.Settings.Ppm - 1)));
+        ppm.DropDownItems.Add(new ToolStripMenuItem("Reset to 0", null, (_, _) => _c.SetPpm(0)));
+        m.Items.Add(ppm);
+        m.Items.Add(new ToolStripMenuItem("Antenna power (bias-tee) — powered antennas/LNAs only", null, (_, _) =>
+        {
+            if (!_c.Settings.BiasTee && MessageBox.Show(this,
+                    "This puts 4.5 V on the antenna connector, for powered antennas and LNAs.\n\n" +
+                    "Don't enable it with a plain antenna that shorts the connector to ground, or with equipment that " +
+                    "can't take DC on its input.\n\nTurn antenna power on?",
+                    "808 Radio", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            _c.SetBiasTee(!_c.Settings.BiasTee);
+        }) { Checked = _c.Settings.BiasTee });
         m.Items.Add(new ToolStripSeparator());
         m.Items.Add(new ToolStripMenuItem("Always on top", null, (_, _) =>
         {

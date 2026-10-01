@@ -64,6 +64,21 @@ public sealed class FmReceiver
     public CmaEqualizer Equalizer => _eq;
     /// <summary>RDS station data (analog).</summary>
     public RdsStatus Rds => _rds.Status;
+
+    private double _dcAvg;
+    private long _dcCount;
+    private volatile bool _dcReset;
+
+    /// <summary>Starts a fresh carrier-offset average (e.g. after a frequency correction). Thread-safe.</summary>
+    public void RestartCarrierOffset() => _dcReset = true;
+
+    /// <summary>
+    /// The station carrier's offset from the tuned frequency in Hz (positive = carrier above), averaged over ~3 s.
+    /// Positive means the dongle tunes low.
+    /// </summary>
+    public double CarrierOffsetHz => _dcAvg * Deviation;
+    /// <summary>Seconds of signal behind <see cref="CarrierOffsetHz"/> since the last reset.</summary>
+    public double CarrierOffsetSeconds => _dcCount / ChannelRate;
     /// <summary>Power in the FM channel, dBFS (smoothed).</summary>
     public double ChannelPowerDb => 10 * Math.Log10(_powerAvg);
 
@@ -93,13 +108,25 @@ public sealed class FmReceiver
         // discriminator: angle between successive samples
         Ensure(ref _mpx, nc);
         float pi = _prevI, pq = _prevQ, g = _discGain;
+        double dc = 0;
         for (int k = 0; k < nc; k++)
         {
             float x = _ci[k], y = _cq[k];
-            _mpx[k] = g * MathF.Atan2(y * pi - x * pq, x * pi + y * pq);
+            float v = g * MathF.Atan2(y * pi - x * pq, x * pi + y * pq);
+            _mpx[k] = v;
+            dc += v;
             pi = x; pq = y;
         }
         _prevI = pi; _prevQ = pq;
+        // The discriminator's average is the carrier's offset from where we tuned (broadcast audio has no DC). A
+        // broadcaster's carrier is accurate to a few Hz, so this measures our own tuning error. Averaged over ~3 s.
+        if (_dcReset) { _dcReset = false; _dcAvg = 0; _dcCount = 0; }
+        if (nc > 0)
+        {
+            double k3 = Math.Min(1, nc / (ChannelRate * 3));
+            _dcAvg = _dcCount == 0 ? dc / nc : _dcAvg + k3 * (dc / nc - _dcAvg);
+            _dcCount += nc;
+        }
 
         // MPX -> stereo audio
         Ensure(ref _mpx2, _mpxDec.MaxOutput(nc));
@@ -116,6 +143,7 @@ public sealed class FmReceiver
     {
         _hbI.Reset(); _hbQ.Reset(); _chI.Reset(); _chQ.Reset(); _mpxDec.Reset(); _stereo.Reset(); _eq.Reset(); _rds.Reset();
         _prevI = 1; _prevQ = 0; _powerAvg = 1e-9;
+        _dcAvg = 0; _dcCount = 0;
     }
 
     private static void Ensure(ref float[] a, int n)

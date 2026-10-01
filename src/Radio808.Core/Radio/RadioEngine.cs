@@ -146,6 +146,30 @@ public sealed class RadioEngine : IDisposable
 
     internal void ApplyGain(double db) => _dev.Gain = db;
 
+    /// <summary>Frequency correction (ppm) applied to the dongle.</summary>
+    public int Ppm
+    {
+        get => _dev.Ppm;
+        set { _dev.Ppm = value; _rx.RestartCarrierOffset(); }
+    }
+
+    /// <summary>Antenna power (bias-tee).</summary>
+    public bool BiasTee { get => _dev.BiasTee; set => _dev.BiasTee = value; }
+
+    /// <summary>
+    /// The dongle's remaining frequency error in ppm, measured from the current station's carrier (positive = the
+    /// dongle tunes high), or null unless a solid stereo station has been averaged for a few seconds.
+    /// </summary>
+    public double? MeasuredPpmError
+    {
+        get
+        {
+            var st = _rx.Stereo;
+            if (!st.PilotLocked || _rx.CarrierOffsetSeconds < 4 || _rx.Equalizer.Ripple > 0.35) return null;
+            return -_rx.CarrierOffsetHz / Frequency * 1e6;
+        }
+    }
+
     /// <summary>
     /// Seeks to the next station up (+1) or down (-1), wrapping around the band. Audio is muted while seeking.
     /// Returns false (and goes back to the start frequency) if the whole band was empty.

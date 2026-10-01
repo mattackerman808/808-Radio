@@ -107,9 +107,21 @@ public sealed unsafe class RtlSdrDevice : IIqSource
         }
     }
 
-    public int PpmCorrection
+    private int _ppm;
+    private bool _biasTee;
+
+    /// <summary>Crystal error correction in ppm (the driver corrects both tuning and sample rate, and retunes).</summary>
+    public int Ppm
     {
-        set { lock (_ctl) if (value != 0) RtlSdrNative.rtlsdr_set_freq_correction(_dev, value); }
+        get => _ppm;
+        set
+        {
+            lock (_ctl)
+            {
+                int r = RtlSdrNative.rtlsdr_set_freq_correction(_dev, value);
+                if (r == 0 || r == -2) _ppm = value;   // -2: already set
+            }
+        }
     }
 
     /// <summary>Tuner gain in dB, or null for the tuner's automatic gain.</summary>
@@ -129,7 +141,8 @@ public sealed unsafe class RtlSdrDevice : IIqSource
 
     public bool BiasTee
     {
-        set { lock (_ctl) RtlSdrNative.rtlsdr_set_bias_tee(_dev, value ? 1 : 0); }
+        get => _biasTee;
+        set { lock (_ctl) if (RtlSdrNative.rtlsdr_set_bias_tee(_dev, value ? 1 : 0) == 0) _biasTee = value; }
     }
     public void Start()
     {
