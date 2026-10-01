@@ -619,7 +619,7 @@ internal sealed class FaceplateView : Control
         Label(g, "HD CH", 10, lit, new RectangleF(142, 196, 52, 14), StringAlignment.Center, bold: true);   // next HD program
         Label(g, "DISP", 10, lit, new RectangleF(200, 196, 52, 14), StringAlignment.Center, bold: true);
         Key(g, new RectangleF(142, 212, 52, 22), "band", NextProgram);
-        Key(g, new RectangleF(200, 212, 52, 22), "disp", SwapDisplay);
+        Key(g, new RectangleF(200, 212, 52, 22), "disp", NextDisplay);
     }
 
     private static void Marquee(int len, int cells, ref int chars, ref int ticks)
@@ -630,12 +630,14 @@ internal sealed class FaceplateView : Control
         if (ticks > start && (ticks - start) % every == 0 && ++chars > len + 3) chars = ticks = 0;
     }
 
-    /// <summary>DISP: swap the song and the station info between the big line and the small one.</summary>
-    public void SwapDisplay()
+    /// <summary>DISP: the next combination of what the big and small lines show (it flashes its name).</summary>
+    public void NextDisplay() => SetDisplay((Mode + 1) % DisplayModes.Length);
+
+    public void SetDisplay(int mode)
     {
-        _c.Settings.DisplayMode = SongOnTop ? 1 : 0;
+        _c.Settings.DisplayMode = Math.Clamp(mode, 0, DisplayModes.Length - 1);
         _scrollChars = _scrollTicks = _subScroll = _subTicks = 0;
-        Invalidate();
+        Flash(DisplayModes[Mode].Name, 1.2);
     }
 
     public void NextProgram()
@@ -683,13 +685,13 @@ internal sealed class FaceplateView : Control
         DotMatrix.Draw(g, _mainCols, _scrollChars * DotMatrix.CellCols, 292, 76, 6.3f, MainCells, alert ? Alert : lit, ghost);
         if (eng == null && !_c.Starting) _hits.Add(new Hit(new RectangleF(284, 64, 500, 64), "start", () => _ = _c.StartAsync()));
 
-        // line 2: a full-width small dot-matrix line: the info that isn't on the big line (station "KLLC 97.3", or the
-        // song: DISP swaps them), the station's HD programs, and the clock on the right
+        // line 2: a full-width small dot-matrix line: the big line's partner in the DISP combination (station "KLLC 97.3",
+        // the song, the genre, ...), and the clock on the right
         string clockText = DateTime.Now.ToString("H:mm").PadLeft(5);
         var l2 = DotMatrix.Columns(new string(' ', Line2Cells - clockText.Length) + clockText);
         DotMatrix.Draw(g, l2, 0, 292, 136, 3.1f, Line2Cells, lit, ghost, glow: false);   // ends ~776, left of the art square
-        bool hdList = hd != null && synced && hd.Programs.Count > 0 && eng != null;
-        _subCells = hdList ? 10 : 20;   // up to the HD list, or to the clock
+
+        _subCells = Line2Cells - 6;   // up to the clock
         string sub = SubText(eng, hd, rds, synced, mhz);
         if (sub != _subText)
         {
@@ -698,34 +700,6 @@ internal sealed class FaceplateView : Control
             _subScroll = _subTicks = 0;
         }
         DotMatrix.Draw(g, _subCols, _subScroll * DotMatrix.CellCols, 292, 136, 3.1f, _subCells, lit, ghost, glow: false);
-        // the station's HD programs in the middle ("HD 1 2 3"): the one you're hearing fully lit; the one you've chosen
-        // blinks while it locks in (switching programs, or HD coming back); the rest dimmer. All dimmer when HD is too
-        // weak to play (WEAK says why). Click a number to switch.
-        if (hdList && hd != null && eng != null)
-        {
-            const float pitch = 3.1f, cellW = pitch * DotMatrix.CellCols;
-            var dim = Color.FromArgb(110, lit);
-            bool tooWeak = eng.HdTooWeak, blinkOn = DateTime.UtcNow.Millisecond < 500;
-            var progs = hd.Programs.Keys.ToList();
-            int cell = 11;
-            void Cell(string ch, Color c) => DotMatrix.Draw(g, DotMatrix.Columns(ch), 0, 292 + cell * cellW, 136, pitch, 1, c, ghost, glow: false);
-            Cell("H", playingHd ? lit : dim); cell++;
-            Cell("D", playingHd ? lit : dim); cell += 2;
-            bool spaced = progs.Count <= 4;
-            foreach (uint p in progs)
-            {
-                uint prog = p;
-                bool chosen = p == eng.Program;
-                var c = !chosen ? dim : playingHd ? lit : !tooWeak && !_c.Settings.ForceAnalog && blinkOn ? lit : dim;
-                Cell(((p + 1) % 10).ToString(), c);
-                _hits.Add(new Hit(new RectangleF(292 + cell * cellW - 2, 132, cellW + 2, 30), "prog" + p, () =>
-                {
-                    _c.SetProgram(prog);
-                    Flash($"HD{prog + 1}/{progs.Count}");
-                }));
-                cell += spaced ? 2 : 1;
-            }
-        }
 
         // line 3: the status lights, fixed legends printed on the glass like a real head unit's display: each is either
         // lit or dark, and nothing moves. HD WEAK · stereo RDS · SEEK · WX TRAFFIC, signal bars at the right end.
@@ -746,6 +720,41 @@ internal sealed class FaceplateView : Control
         x = wxEnd;
         float trfEnd = Indicator(g, x, 172, "TRAFFIC", trf, false, lit);
         if (trf) _hits.Add(new Hit(new RectangleF(x - 2, 168, trfEnd - x, 22), "trf", () => MapRequested?.Invoke("traffic")));
+
+        // a mini dot matrix after the lights, always there (unlit without HD): the station's HD programs, "HD 1 2 3".
+        // The one you're hearing fully lit; the one you've chosen blinks while it locks in (switching programs, or HD
+        // coming back); the rest dimmer. All dimmer when HD is too weak to play (WEAK says why). Click a number.
+        {
+            const float pitch = 2.2f, cellW = pitch * DotMatrix.CellCols;
+            const int cells = 13;
+            float mx = trfEnd + 14, my = 171;
+            DotMatrix.Draw(g, DotMatrix.Columns(""), 0, mx, my, pitch, cells, lit, ghost, glow: false);
+            if (hd != null && synced && hd.Programs.Count > 0 && eng != null)
+            {
+                var dim = Color.FromArgb(110, lit);
+                bool tooWeak = eng.HdTooWeak, blinkOn = DateTime.UtcNow.Millisecond < 500;
+                var progs = hd.Programs.Keys.ToList();
+                int cell = 0;
+                void Cell(string ch, Color c) => DotMatrix.Draw(g, DotMatrix.Columns(ch), 0, mx + cell * cellW, my, pitch, 1, c, ghost, glow: false);
+                Cell("H", playingHd ? lit : dim); cell++;
+                Cell("D", playingHd ? lit : dim); cell += 2;
+                bool spaced = progs.Count <= 4;
+                foreach (uint p in progs)
+                {
+                    if (cell >= cells) break;
+                    uint prog = p;
+                    bool chosen = p == eng.Program;
+                    var c = !chosen ? dim : playingHd ? lit : !tooWeak && !_c.Settings.ForceAnalog && blinkOn ? lit : dim;
+                    Cell(((p + 1) % 10).ToString(), c);
+                    _hits.Add(new Hit(new RectangleF(mx + cell * cellW - 3, 166, cellW + 4, 26), "prog" + p, () =>
+                    {
+                        _c.SetProgram(prog);
+                        Flash($"HD{prog + 1}/{progs.Count}");
+                    }));
+                    cell += spaced ? 2 : 1;
+                }
+            }
+        }
 
         // art square: album art / station logo (click to enlarge), else the audio spectrum analyzer
         var sq = AnalyzerArea;
@@ -826,36 +835,60 @@ internal sealed class FaceplateView : Control
         if (_c.Seeking) return $"SEEK  {mhz}";
         if (!string.IsNullOrEmpty(hd?.Alert)) { alert = true; return "ALERT  " + hd.Alert.ToUpperInvariant(); }
 
-        var (song, station) = Info(hd, rds, synced, mhz);
-        return (SongOnTop ? song ?? station : station).ToUpperInvariant();
+        return Item(DisplayModes[Mode].Top, eng, hd, rds, synced, mhz, null).ToUpperInvariant();
     }
 
-    /// <summary>DISP swaps the song and the station info between the big and the small line.</summary>
-    private bool SongOnTop => _c.Settings.DisplayMode != 1;
+    // ---- what the two dot-matrix lines show: DISP steps through these (big line, small line) combinations ----
 
-    /// <summary>The small line's info: whichever of song / station isn't on the big line.</summary>
+    internal enum InfoItem { Song, Station, Genre, Artist, Title, Frequency }
+
+    public static readonly (string Name, InfoItem Top, InfoItem Bottom)[] DisplayModes =
+    {
+        ("SONG / STATION", InfoItem.Song, InfoItem.Station),
+        ("STATION / SONG", InfoItem.Station, InfoItem.Song),
+        ("STATION / GENRE", InfoItem.Station, InfoItem.Genre),
+        ("ARTIST / TITLE", InfoItem.Artist, InfoItem.Title),
+        ("FREQUENCY / STATION", InfoItem.Frequency, InfoItem.Station),
+    };
+
+    private int Mode => Math.Clamp(_c.Settings.DisplayMode, 0, DisplayModes.Length - 1);
+
+    /// <summary>The small line's info (the big line's partner in the current DISP combination).</summary>
     private string SubText(RadioEngine? eng, HdStatus? hd, RdsStatus? rds, bool synced, string mhz)
     {
         if (eng == null) return $"FM {mhz}";
-        var (song, station) = Info(hd, rds, synced, mhz);
-        // no song info: the station's on the big line either way, so show its format here ("CLASSIC ROCK"), if any
-        string format = rds?.PtyName ?? "";
-        return (song == null ? format : SongOnTop ? station : song).ToUpperInvariant();
+        var (_, top, bottom) = DisplayModes[Mode];
+        return Item(bottom, eng, hd, rds, synced, mhz, Item(top, eng, hd, rds, synced, mhz, null)).ToUpperInvariant();
     }
 
     /// <summary>
-    /// What's playing (HD title - artist, else RDS RadioText; null if neither), and the station: its HD name or RDS
-    /// name / call sign with the frequency ("KLLC 97.3"; just the name if it already has the frequency in it).
+    /// One piece of info for a display line. Missing info falls back to the next most useful thing (no song: the
+    /// station; no genre: the frequency); <paramref name="avoid"/> is the other line's text, so they don't repeat.
     /// </summary>
-    private static (string? song, string station) Info(HdStatus? hd, RdsStatus? rds, bool synced, string mhz)
+    private string Item(InfoItem item, RadioEngine? eng, HdStatus? hd, RdsStatus? rds, bool synced, string mhz, string? avoid)
     {
+        string freq = $"FM {mhz}";
         string? name = synced ? hd?.StationName : null;
         name ??= rds?.ProgramService?.Trim() is { Length: > 0 } ps ? ps : rds?.CallSign;
-        string station = string.IsNullOrWhiteSpace(name) ? $"FM {mhz}" : name.Contains(mhz) ? name : $"{name} {mhz}";
-        string? song = null;
-        if (synced && hd?.Title != null) song = hd.Artist != null ? $"{hd.Title} - {hd.Artist}" : hd.Title;
-        song ??= rds?.RadioText;
-        return (string.IsNullOrWhiteSpace(song) ? null : song, station);
+        string station = string.IsNullOrWhiteSpace(name) ? freq : name.Contains(mhz) ? name : $"{name} {mhz}";
+        string? title = synced && !string.IsNullOrWhiteSpace(hd?.Title) ? hd!.Title : null;
+        string? artist = synced && !string.IsNullOrWhiteSpace(hd?.Artist) ? hd!.Artist : null;
+        string? song = title != null ? (artist != null ? $"{title} - {artist}" : title) : rds?.RadioText is { Length: > 0 } rt ? rt : null;
+        string? genre = eng != null && synced && hd != null && hd.Programs.TryGetValue(eng.Program, out var type) && !string.IsNullOrWhiteSpace(type)
+            ? type : rds?.PtyName is { Length: > 0 } pty ? pty : null;
+
+        IEnumerable<string?> choices = item switch
+        {
+            InfoItem.Song => new[] { song, station, genre, freq },
+            InfoItem.Station => new[] { station, genre, freq },
+            InfoItem.Genre => new[] { genre, freq, station },
+            InfoItem.Artist => new[] { artist, song, station, freq },
+            InfoItem.Title => new[] { title, station, genre, freq },
+            _ => new[] { freq, station },
+        };
+        foreach (var c in choices)
+            if (!string.IsNullOrWhiteSpace(c) && !string.Equals(c, avoid, StringComparison.OrdinalIgnoreCase)) return c;
+        return avoid == null ? freq : "";
     }
 
     /// <summary>A small segment-style indicator: outlined when on, filled when active, ghosted when off.</summary>

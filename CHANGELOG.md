@@ -2,14 +2,15 @@
 
 ## Unreleased
 
-- **Display reworked like a real head unit's:** a large dot-matrix line with the song; a full-width small one with
-  the station (`KLLC 97.3`), its HD programs and the clock (`KLLC 97.3  HD 1 2 3  11:52`: the program you're hearing
-  lit, the one you've chosen blinking while it locks in, click one to switch), where **DISP** now swaps the song and
-  the station between the two lines (both scroll when they don't fit); and a row of fixed status lights, each lit or
-  dark, nothing moving: **HD**, **WEAK** (red), the classic interlocking-rings stereo indicator, **RDS**, **SEEK**,
-  **WX**, **TRAFFIC**. The HD1/HD2/… tags that came and went are gone, and the **BAND** key is renamed **HD CH**: it
-  steps through the programs (`HD2/3 CLASSIC ROCK`). DGTL is folded into HD (filled: digital audio), the "HD IN 12S"
-  countdown into WEAK, and the P1–P6 badge into the preset keys (the one you're on is outlined).
+- **Display reworked like a real head unit's:** a large dot-matrix line and a full-width small one with the clock;
+  **DISP** steps through what they show (song / station, station / song, station / genre, artist / title,
+  frequency / station; long text scrolls on both). Below them, a row of fixed status lights, each lit or dark, nothing
+  moving: **HD**, **WEAK** (red), the classic interlocking-rings stereo indicator, **RDS**, **SEEK**, **WX**,
+  **TRAFFIC**; then a mini dot matrix with the station's HD programs (`HD 1 2 3`: the one you're hearing lit, the one
+  you've chosen blinking while it locks in, click one to switch). The HD1/HD2/… tags that came and went are gone, and
+  the **BAND** key is renamed **HD CH**: it steps through the programs (`HD2/3 CLASSIC ROCK`). DGTL is folded into HD
+  (filled: digital audio), the "HD IN 12S" countdown into WEAK, and the P1–P6 badge into the preset keys (the one
+  you're on is outlined).
 - **One signal meter**, the slot on the right of the faceplate, showing the reception quality of what you're
   hearing: HD MER while HD plays, else the FM pilot SNR (it used to switch to HD MER whenever HD was found, even when
   too weak to play). The small signal bars on the display, which duplicated it, are gone.

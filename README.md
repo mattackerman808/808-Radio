@@ -47,15 +47,16 @@ anywhere, though the tuning grid, de-emphasis and program types are US defaults 
 | **Presets 1–6** | click to tune, hold (or right-click, or Ctrl+1–6) to save |
 | **SRC** | HD (automatic blend) or analog FM only (A) |
 | **HD CH** | next HD program: HD1, HD2 … (H); or click a number in the display's `HD 1 2 3` |
-| **DISP** | swap the song and the station between the big and small display lines (D) |
+| **DISP** | what the two display lines show: song / station, station / song, station / genre, artist / title, frequency / station (D) |
 | **Bulb key** | illumination color (C): cyan, amber, green, red, blue, white |
 | **▲** | flip the faceplate down to the instrument panel (O) |
 | **Right-click** | source (USB or network dongle), gain, frequency correction, antenna power (bias-tee), album art, panel frame rate, always on top, … |
 
-Drag the faceplate to move it; drag its edges to resize. The display has a large dot-matrix line with the song, a
-small one with the station (`ALICE-97.3`, `KLLC 97.3`), the station's HD programs and the clock
-(`KLLC 97.3  HD 1 2 3  11:52`: the program you're hearing is lit, the one you've chosen blinks while it locks in;
-choose with **HD CH** or click a number); **DISP** swaps the song and the station between the two lines, and a row of fixed status lights: **HD** (outlined: found; filled: you're hearing
+Drag the faceplate to move it; drag its edges to resize. The display has a large dot-matrix line and a small one with
+the clock: **DISP** steps through what they show (song / station, station / song, station / genre, artist / title,
+frequency / station; long text scrolls). Below them is a row of fixed status lights, then a mini dot matrix with the
+station's HD programs (`HD 1 2 3`: the one you're hearing is lit, the one you've chosen blinks while it locks in;
+choose with **HD CH** or click a number). The lights: **HD** (outlined: found; filled: you're hearing
 the digital audio), **WEAK** in red (HD found, with its station name and programs, but the signal is too poor to play
 its audio, so you hear the analog), the stereo rings, **RDS**, **SEEK**, **WX** / **TRAFFIC** (weather / traffic map
 available: click it). The preset you're on is outlined in the row of preset keys. The slot on the right of the
