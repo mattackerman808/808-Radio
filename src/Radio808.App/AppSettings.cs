@@ -27,6 +27,10 @@ public sealed class AppSettings
     /// <summary>Tuner gain in dB; null = automatic (not recommended: strong stations overload it).</summary>
     public double? GainDb { get; set; } = 16.6;
     public List<Preset?> Presets { get; set; } = new();
+    /// <summary>Index into the faceplate's illumination colors.</summary>
+    public int Illumination { get; set; }
+    /// <summary>Display mode: 0 = now playing, 1 = station name, 2 = frequency.</summary>
+    public int DisplayMode { get; set; }
     public int[]? WindowBounds { get; set; }
 
     private static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "808Radio");

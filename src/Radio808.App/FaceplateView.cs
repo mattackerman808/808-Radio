@@ -1,0 +1,667 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Text;
+using System.IO;
+using System.Linq;
+using System.Windows.Forms;
+using Radio808.Core.Dsp;
+using Radio808.Core.Hd;
+using Radio808.Core.Radio;
+
+namespace Radio808.App;
+
+/// <summary>
+/// The radio as a single-DIN car stereo: glossy faceplate, illuminated keys, a volume knob with a light ring, and a
+/// dot-matrix display. Custom painted on a 1000 x 300 design canvas that scales to the window; everything clickable
+/// registers a hit rectangle while painting.
+/// </summary>
+internal sealed class FaceplateView : Control
+{
+    private const float W = 1000, H = 300;
+    private const int MainCells = 13;
+
+    public static readonly (string Name, Color Color)[] Illuminations =
+    {
+        ("Cyan", Color.FromArgb(0x2B, 0xE4, 0xF2)), ("Amber", Color.FromArgb(0xFF, 0xA8, 0x26)),
+        ("Green", Color.FromArgb(0x5C, 0xFF, 0x86)), ("Red", Color.FromArgb(0xFF, 0x45, 0x45)),
+        ("Blue", Color.FromArgb(0x4A, 0x8C, 0xFF)), ("White", Color.FromArgb(0xE6, 0xF2, 0xFF)),
+    };
+
+    private static readonly Color Body1 = Color.FromArgb(0x30, 0x34, 0x3B), Body2 = Color.FromArgb(0x0D, 0x0F, 0x12);
+    private static readonly Color Face1 = Color.FromArgb(0x1A, 0x1D, 0x22), Face2 = Color.FromArgb(0x08, 0x09, 0x0B);
+    private static readonly Color Key1 = Color.FromArgb(0x2A, 0x2E, 0x35), Key2 = Color.FromArgb(0x0E, 0x10, 0x13);
+    private static readonly Color Silver = Color.FromArgb(0xB8, 0xBE, 0xC6), Grey = Color.FromArgb(0x6E, 0x76, 0x80);
+    private static readonly Color Alert = Color.FromArgb(0xFF, 0x4A, 0x4A);
+
+    private readonly RadioController _c;
+    private float _scale = 1, _ox, _oy;
+
+    private sealed record Hit(RectangleF R, string Id, Action? Click, Action? Hold = null);
+    private readonly List<Hit> _hits = new();
+    private string? _hover, _pressed;
+    private bool _holdFired, _knobDrag, _knobMoved;
+    private PointF _knobStart;
+    private float _knobStartVol;
+    private readonly Timer _hold = new() { Interval = 650 };
+    private Action? _holdAction;
+
+    // display state
+    private string _mainText = "";
+    private List<bool[]> _mainCols = new();
+    private int _scrollChars, _scrollTicks;
+    private string? _flash;
+    private DateTime _flashUntil;
+
+    private byte[]? _artKey;
+    private Image? _art;
+
+    private readonly Fft _fft = new(4096);
+    private readonly float[] _specIq = new float[8192], _re = new float[4096], _im = new float[4096], _db = new float[4096];
+    private const int Bars = 16;
+    private readonly float[] _bars = new float[Bars];
+    private bool _specValid;
+
+    public event Action<string>? MapRequested;
+    public event Action<Point>? MenuRequested;
+
+    public FaceplateView(RadioController c)
+    {
+        _c = c;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint
+                 | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+        _hold.Tick += (_, _) =>
+        {
+            _hold.Stop();
+            _holdFired = true;
+            _holdAction?.Invoke();
+            Invalidate();
+        };
+    }
+
+    private Color Lit => Illuminations[Math.Clamp(_c.Settings.Illumination, 0, Illuminations.Length - 1)].Color;
+
+    /// <summary>Shows a short message on the display for a moment (e.g. "VOL 18", "P3 SAVED").</summary>
+    public void Flash(string text, double seconds = 1.6)
+    {
+        _flash = text.ToUpperInvariant();
+        _flashUntil = DateTime.UtcNow.AddSeconds(seconds);
+        Invalidate();
+    }
+
+    // ------------------------------------------------------------------ periodic update (100 ms)
+
+    public void Tick()
+    {
+        PullSpectrum();
+        // marquee: hold 2 s at the start, then one character every 300 ms, a gap, and around again
+        int len = _mainCols.Count / DotMatrix.CellCols;
+        if (len > MainCells)
+        {
+            _scrollTicks++;
+            int start = 20, every = 3;
+            if (_scrollTicks > start && (_scrollTicks - start) % every == 0)
+            {
+                _scrollChars++;
+                if (_scrollChars > len + 3) { _scrollChars = 0; _scrollTicks = 0; }
+            }
+        }
+        Invalidate();
+    }
+
+    private void PullSpectrum()
+    {
+        var eng = _c.Engine;
+        if (eng == null) { _specValid = false; return; }
+        if (!eng.TryGetSpectrumBlock(_specIq)) return;
+        _fft.PowerDb(_specIq, _re, _im, _db);
+        int per = 4096 / Bars;
+        var v = new float[Bars];
+        for (int b = 0; b < Bars; b++)
+        {
+            float sum = 0;
+            for (int k = 0; k < per; k++) sum += MathF.Pow(10, _db[b * per + k] / 10);
+            v[b] = 10 * MathF.Log10(sum / per);
+        }
+        float floor = v.Min();
+        for (int b = 0; b < Bars; b++)
+        {
+            float level = Math.Clamp((v[b] - floor) / 30f, 0, 1);
+            _bars[b] = _specValid ? Math.Max(level, _bars[b] - 0.08f) : level;   // fast attack, slow fall
+        }
+        _specValid = true;
+    }
+
+    // ------------------------------------------------------------------ painting
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(Color.FromArgb(0x05, 0x06, 0x07));
+        _scale = Math.Min(Width / W, Height / H);
+        if (_scale <= 0) return;
+        _ox = (Width - W * _scale) / 2;
+        _oy = (Height - H * _scale) / 2;
+        g.TranslateTransform(_ox, _oy);
+        g.ScaleTransform(_scale, _scale);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = TextRenderingHint.AntiAlias;
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        _hits.Clear();
+
+        DrawBody(g);
+        DrawLeftKeys(g);
+        DrawKnob(g);
+        DrawDisplay(g);
+        DrawKeyStrip(g);
+        DrawRightSide(g);
+    }
+
+    private void DrawBody(Graphics g)
+    {
+        var outer = new RectangleF(12, 14, 976, 272);
+        using (var p = Rounded(outer, 26))
+        {
+            using (var b = new LinearGradientBrush(outer, Body1, Body2, 90f)) g.FillPath(b, p);
+            using var pen = new Pen(Color.FromArgb(0x48, 0x4E, 0x57), 1.5f);
+            g.DrawPath(pen, p);
+        }
+        // gloss highlight along the top edge
+        using (var hl = new Pen(Color.FromArgb(40, Color.White), 1.2f)) g.DrawLine(hl, 40, 17, 960, 17);
+        var face = new RectangleF(24, 26, 952, 248);
+        using (var p = Rounded(face, 20))
+        {
+            using (var b = new LinearGradientBrush(face, Face1, Face2, 90f)) g.FillPath(b, p);
+            using var pen = new Pen(Color.FromArgb(0x05, 0x05, 0x06), 2f);
+            g.DrawPath(pen, p);
+        }
+        // brand above the display, model name at the right
+        BrandMark.Draw(g, 538, 32, 20, Silver);
+        Label(g, "HD-808", 9.5f, Grey, new RectangleF(820, 32, 92, 20), StringAlignment.Far);
+    }
+
+    private void DrawLeftKeys(Graphics g)
+    {
+        var lit = Lit;
+        // MUTE (patterned, like an illuminated phone key)
+        var mute = new RectangleF(36, 40, 86, 54);
+        Key(g, mute, "mute", _c.ToggleMute, pattern: true);
+        SpeakerIcon(g, new RectangleF(mute.X, mute.Y, mute.Width, mute.Height), _c.Settings.Muted, lit);
+
+        // SRC: HD / FM
+        var src = new RectangleF(36, 110, 62, 56);
+        Key(g, src, "src", () =>
+        {
+            _c.SetForceAnalog(!_c.Settings.ForceAnalog);
+            Flash(_c.Settings.ForceAnalog ? "SOURCE FM" : "SOURCE HD");
+        });
+        PowerIcon(g, src.X + src.Width / 2, src.Y + 20, 8, lit);
+        Label(g, "SRC", 12, lit, new RectangleF(src.X, src.Y + 32, src.Width, 18), StringAlignment.Center, bold: true);
+
+        // COLOR (patterned)
+        var col = new RectangleF(36, 182, 86, 54);
+        Key(g, col, "color", CycleColor, pattern: true);
+        BulbIcon(g, col.X + col.Width / 2, col.Y + col.Height / 2, lit);
+    }
+
+    public void CycleColor()
+    {
+        _c.Settings.Illumination = (_c.Settings.Illumination + 1) % Illuminations.Length;
+        _c.Settings.Save();
+        Flash("COLOR " + Illuminations[_c.Settings.Illumination].Name);
+    }
+
+    private void DrawKnob(Graphics g)
+    {
+        float cx = 196, cy = 124, r = 58;
+        var lit = Lit;
+        // light ring: dim track, lit arc for the volume, glow
+        float vol = _c.Settings.Volume;
+        bool muted = _c.Settings.Muted;
+        var ring = new RectangleF(cx - r - 9, cy - r - 9, 2 * (r + 9), 2 * (r + 9));
+        using (var track = new Pen(Color.FromArgb(40, lit), 6)) g.DrawArc(track, ring, 135, 270);
+        if (vol > 0.001f)
+        {
+            var c = muted ? Grey : lit;
+            using (var glow = new Pen(Color.FromArgb(60, c), 14) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawArc(glow, ring, 135, 270 * vol);
+            using (var arc = new Pen(c, 5) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawArc(arc, ring, 135, 270 * vol);
+        }
+        // the knob: dark metal with a bright rim and a pointer
+        var kr = new RectangleF(cx - r, cy - r, 2 * r, 2 * r);
+        using (var b = new LinearGradientBrush(kr, Color.FromArgb(0x3A, 0x3F, 0x47), Color.FromArgb(0x0B, 0x0C, 0x0E), 70f)) g.FillEllipse(b, kr);
+        using (var rim = new Pen(Color.FromArgb(0x5A, 0x61, 0x6B), 2)) g.DrawEllipse(rim, kr);
+        var inner = new RectangleF(cx - r + 10, cy - r + 10, 2 * r - 20, 2 * r - 20);
+        using (var b = new LinearGradientBrush(inner, Color.FromArgb(0x23, 0x27, 0x2D), Color.FromArgb(0x14, 0x16, 0x1A), 250f)) g.FillEllipse(b, inner);
+        double a = (135 + 270 * vol) * Math.PI / 180;
+        float px = cx + (float)Math.Cos(a) * (r - 16), py = cy + (float)Math.Sin(a) * (r - 16);
+        using (var dot = new SolidBrush(muted ? Grey : lit)) g.FillEllipse(dot, px - 3.5f, py - 3.5f, 7, 7);
+        _hits.Add(new Hit(new RectangleF(cx - r - 12, cy - r - 12, 2 * r + 24, 2 * r + 24), "knob", null));
+
+        // BAND / DISP
+        Label(g, "BAND", 10, lit, new RectangleF(142, 196, 52, 14), StringAlignment.Center, bold: true);
+        Label(g, "DISP", 10, lit, new RectangleF(200, 196, 52, 14), StringAlignment.Center, bold: true);
+        Key(g, new RectangleF(142, 212, 52, 22), "band", NextProgram);
+        Key(g, new RectangleF(200, 212, 52, 22), "disp", () =>
+        {
+            _c.Settings.DisplayMode = (_c.Settings.DisplayMode + 1) % 3;
+            Flash(_c.Settings.DisplayMode switch { 0 => "NOW PLAYING", 1 => "STATION", _ => "FREQUENCY" });
+        });
+    }
+
+    public void NextProgram()
+    {
+        var eng = _c.Engine;
+        if (eng == null || eng.Hd.Programs.Count == 0) { Flash("NO HD"); return; }
+        var progs = eng.Hd.Programs.Keys.ToList();
+        int i = progs.IndexOf(eng.Program);
+        var p = progs[(i + 1) % progs.Count];
+        _c.SetProgram(p);
+        Flash($"HD{p + 1}");
+    }
+
+    // ------------------------------------------------------------------ the display
+
+    private void DrawDisplay(Graphics g)
+    {
+        var lit = Lit;
+        var glass = new RectangleF(272, 56, 640, 142);
+        using (var p = Rounded(glass, 7))
+        {
+            using (var b = new LinearGradientBrush(glass, Color.FromArgb(0x07, 0x0C, 0x0F), Color.FromArgb(0x02, 0x04, 0x05), 90f)) g.FillPath(b, p);
+            using var pen = new Pen(Color.FromArgb(0x22, 0x28, 0x2F), 1.5f);
+            g.DrawPath(pen, p);
+        }
+        var ghost = Color.FromArgb(20, lit);
+        var eng = _c.Engine;
+        var hd = eng?.Hd;
+        var rds = eng?.Receiver.Rds;
+        bool synced = hd?.Synced == true, playingHd = eng?.Blender.PlayingHd == true;
+        long freq = _c.Frequency;
+        string mhz = (freq / 1e6).ToString("0.0");
+
+        // main line
+        string text = MainText(eng, hd, rds, synced, mhz, out bool alert);
+        if (text != _mainText)
+        {
+            _mainText = text;
+            _mainCols = DotMatrix.Columns(text);
+            _scrollChars = 0; _scrollTicks = 0;
+        }
+        DotMatrix.Draw(g, _mainCols, _scrollChars * DotMatrix.CellCols, 292, 76, 6.3f, MainCells, alert ? Alert : lit, ghost);
+        if (eng == null && !_c.Starting) _hits.Add(new Hit(new RectangleF(284, 64, 500, 64), "start", () => _ = _c.StartAsync()));
+
+        // line 2: band + frequency, indicators, signal, clock
+        string band = playingHd && eng != null ? $"HD{eng.Program + 1}" : "FM";
+        var l2 = DotMatrix.Columns($"{band,-4}{mhz,5}");
+        DotMatrix.Draw(g, l2, 0, 292, 140, 3.1f, 9, lit, ghost, glow: false);
+        float x = 470;
+        x = Indicator(g, x, 138, "HD", synced, playingHd, lit);
+        x = Indicator(g, x, 138, "DGTL", playingHd, false, lit);
+        x = Indicator(g, x, 138, "ST", eng != null && (playingHd || eng.Receiver.Stereo.PilotLocked && eng.Receiver.Stereo.Blend > 0.5f), false, lit);
+        x = Indicator(g, x, 138, "RDS", rds?.Synced == true, false, lit);
+        int preset = _c.Settings.Presets.FindIndex(p => p != null && Math.Abs(p.Mhz * 1e6 - freq) < 50_000);
+        if (preset >= 0) x = Indicator(g, x, 138, $"P{preset + 1}", true, false, lit);
+        // signal bars
+        int bars = eng == null ? 0 : Math.Clamp((int)Math.Round((eng.Receiver.ChannelPowerDb + 52) / 8), 0, 5);
+        for (int i = 0; i < 5; i++)
+        {
+            float bh = 4 + i * 3;
+            using var b = new SolidBrush(i < bars ? lit : ghost);
+            g.FillRectangle(b, 664 + i * 6, 160 - bh, 4, bh);
+        }
+        var clock = DotMatrix.Columns(DateTime.Now.ToString("H:mm").PadLeft(5));
+        DotMatrix.Draw(g, clock, 0, 700, 140, 3.1f, 5, lit, ghost, glow: false);   // ends at ~790, left of the art square
+
+        // line 3: HD programs, maps, alerts
+        x = 292;
+        if (hd != null && synced)
+            foreach (var p in hd.Programs.Keys)
+            {
+                uint prog = p;
+                bool sel = eng != null && p == eng.Program;
+                float nx = Indicator(g, x, 172, $"HD{p + 1}", true, sel, lit);
+                _hits.Add(new Hit(new RectangleF(x - 2, 168, nx - x, 22), "prog" + p, () => { _c.SetProgram(prog); Flash($"HD{prog + 1}"); }));
+                x = nx;
+            }
+        if (hd?.WeatherMap != null)
+        {
+            float nx = Indicator(g, x + 8, 172, "WX", true, false, lit);
+            _hits.Add(new Hit(new RectangleF(x + 6, 168, nx - x - 6, 22), "wx", () => MapRequested?.Invoke("weather")));
+            x = nx;
+        }
+        if (hd != null && hd.TrafficTiles.Any(t => t != null))
+        {
+            float nx = Indicator(g, x + 8, 172, "TRF", true, false, lit);
+            _hits.Add(new Hit(new RectangleF(x + 6, 168, nx - x - 6, 22), "trf", () => MapRequested?.Invoke("traffic")));
+            x = nx;
+        }
+        if (_c.Seeking) Indicator(g, x + 8, 172, "SEEK", true, true, lit);
+        else if (eng != null && synced && !playingHd && !_c.Settings.ForceAnalog && eng.Blender.RetryIn > 0.5)
+            Indicator(g, x + 8, 172, $"HD IN {eng.Blender.RetryIn:0}S", true, false, lit);
+
+        // art square: album art / station logo, else a bar-graph spectrum
+        var sq = new RectangleF(800, 64, 104, 104);
+        Image? art = synced ? Decode(hd?.AlbumArt ?? hd?.StationLogo) : null;
+        if (art != null)
+        {
+            var st = g.Save();
+            using (var clip = Rounded(sq, 5)) g.SetClip(clip);
+            float s = Math.Max(sq.Width / art.Width, sq.Height / art.Height);
+            g.DrawImage(art, sq.X + (sq.Width - art.Width * s) / 2, sq.Y + (sq.Height - art.Height * s) / 2, art.Width * s, art.Height * s);
+            g.Restore(st);
+        }
+        else
+        {
+            float bw = sq.Width / Bars;
+            int segs = 13;
+            float sh = sq.Height / segs;
+            for (int b = 0; b < Bars; b++)
+            {
+                int litSegs = _specValid ? (int)Math.Round(_bars[b] * segs) : 0;
+                for (int s = 0; s < segs; s++)
+                {
+                    bool on = s < litSegs;
+                    using var br = new SolidBrush(on ? Color.FromArgb(b is >= 5 and <= 10 ? 255 : 170, lit) : ghost);
+                    g.FillRectangle(br, sq.X + b * bw + 1, sq.Bottom - (s + 1) * sh + 1, bw - 2, sh - 2);
+                }
+            }
+        }
+    }
+
+    private string MainText(RadioEngine? eng, HdStatus? hd, RdsStatus? rds, bool synced, string mhz, out bool alert)
+    {
+        alert = false;
+        if (_flash != null && DateTime.UtcNow < _flashUntil) return _flash;
+        _flash = null;
+        if (_c.Starting) return "STARTING";
+        if (eng == null) return (_c.Error ?? "CLICK TO START").ToUpperInvariant();
+        if (_c.Seeking) return $"SEEK  {mhz}";
+        if (!string.IsNullOrEmpty(hd?.Alert)) { alert = true; return "ALERT  " + hd.Alert.ToUpperInvariant(); }
+
+        string? station = synced ? hd?.StationName : null;
+        station ??= rds?.ProgramService ?? rds?.CallSign;
+        string? song = null;
+        if (synced && hd?.Title != null) song = hd.Artist != null ? $"{hd.Title} - {hd.Artist}" : hd.Title;
+        song ??= rds?.RadioText;
+
+        string t = _c.Settings.DisplayMode switch
+        {
+            0 => song ?? station ?? $"FM {mhz}",
+            1 => station ?? $"FM {mhz}",
+            _ => $"FM {mhz}",
+        };
+        return t.ToUpperInvariant();
+    }
+
+    /// <summary>A small segment-style indicator: outlined when on, filled when active, ghosted when off.</summary>
+    private float Indicator(Graphics g, float x, float y, string text, bool on, bool active, Color lit)
+    {
+        using var f = new Font("Segoe UI Semibold", 10.5f, FontStyle.Regular, GraphicsUnit.Pixel);
+        float w = g.MeasureString(text, f, PointF.Empty, StringFormat.GenericTypographic).Width + 10;
+        var r = new RectangleF(x, y, w, 16);
+        var c = on ? lit : Color.FromArgb(28, lit);
+        if (active) { using var b = new SolidBrush(c); using var p = Rounded(r, 3); g.FillPath(b, p); }
+        else { using var pen = new Pen(c, 1.1f); using var p = Rounded(r, 3); g.DrawPath(pen, p); }
+        using var tb = new SolidBrush(active ? Color.Black : c);
+        using var fmt = new StringFormat(StringFormat.GenericTypographic) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+        g.DrawString(text, f, tb, new RectangleF(r.X, r.Y + 0.5f, r.Width, r.Height), fmt);
+        return r.Right + 6;
+    }
+
+    private Image? Decode(byte[]? bytes)
+    {
+        if (ReferenceEquals(bytes, _artKey)) return _art;
+        _artKey = bytes;
+        _art?.Dispose();
+        _art = null;
+        if (bytes == null) return null;
+        try
+        {
+            using var ms = new MemoryStream(bytes);
+            using var img = Image.FromStream(ms);
+            _art = new Bitmap(img);
+        }
+        catch { _art = null; }
+        return _art;
+    }
+
+    // ------------------------------------------------------------------ keys under the display
+
+    private void DrawKeyStrip(Graphics g)
+    {
+        var lit = Lit;
+        float y = 214, h = 30;
+        var down = new RectangleF(272, y, 62, h);
+        var up = new RectangleF(338, y, 62, h);
+        Key(g, down, "seekdown", () => _c.Seek(-1), lit: _c.Seeking);
+        SeekIcon(g, down, -1, lit);
+        Key(g, up, "seekup", () => _c.Seek(1), lit: _c.Seeking);
+        SeekIcon(g, up, 1, lit);
+        float x0 = 408, gap = 4, w = (912 - x0 - gap * 5) / 6;
+        for (int i = 0; i < AppSettings.PresetCount; i++)
+        {
+            var r = new RectangleF(x0 + i * (w + gap), y, w, h);
+            int idx = i;
+            var p = _c.Settings.Presets[i];
+            Key(g, r, "preset" + i, () =>
+            {
+                if (_c.Settings.Presets[idx] == null) { Flash($"HOLD {idx + 1} TO SAVE"); return; }
+                _c.RecallPreset(idx);
+            }, hold: () => { StorePreset(idx); Flash($"P{idx + 1} SAVED"); });
+            Label(g, (i + 1).ToString(), 15, lit, new RectangleF(r.X + 8, r.Y, 20, h), StringAlignment.Near, bold: true);
+            if (p != null) Label(g, p.Mhz.ToString("0.0"), 10.5f, Grey, new RectangleF(r.X + 26, r.Y, r.Width - 32, h), StringAlignment.Far);
+        }
+    }
+
+    private void StorePreset(int i)
+    {
+        var eng = _c.Engine;
+        string? name = null;
+        if (eng != null)
+        {
+            name = eng.Hd.Synced ? eng.Hd.StationName : null;
+            name ??= eng.Receiver.Rds.CallSign ?? eng.Receiver.Rds.ProgramService;
+        }
+        _c.StorePreset(i, name);
+    }
+
+    private void DrawRightSide(Graphics g)
+    {
+        var lit = Lit;
+        // illuminated slot: vertical signal-quality meter (HD MER when synced, else FM channel power)
+        var slot = new RectangleF(928, 58, 34, 116);
+        using (var p = Rounded(slot, 8))
+        {
+            using (var b = new SolidBrush(Color.FromArgb(0x06, 0x07, 0x09))) g.FillPath(b, p);
+            using var pen = new Pen(lit, 1.6f);
+            g.DrawPath(pen, p);
+        }
+        var eng = _c.Engine;
+        double q = 0;
+        if (eng != null)
+        {
+            var hd = eng.Hd;
+            q = hd.Synced ? Math.Clamp(((hd.MerLower + hd.MerUpper) / 2 - 3) / 15, 0, 1)
+                          : Math.Clamp((eng.Receiver.ChannelPowerDb + 52) / 40, 0, 1);
+        }
+        int segs = 10;
+        for (int s = 0; s < segs; s++)
+        {
+            bool on = s < Math.Round(q * segs);
+            using var b = new SolidBrush(on ? lit : Color.FromArgb(22, lit));
+            g.FillRectangle(b, slot.X + 9, slot.Bottom - 10 - (s + 1) * 9.4f, slot.Width - 18, 6.5f);
+        }
+        // jack
+        using (var b = new SolidBrush(Color.FromArgb(0x04, 0x04, 0x05))) g.FillEllipse(b, 934, 200, 22, 22);
+        using (var pen = new Pen(Color.FromArgb(0x50, 0x56, 0x5F), 2)) g.DrawEllipse(pen, 934, 200, 22, 22);
+    }
+
+    // ------------------------------------------------------------------ widgets
+
+    private void Key(Graphics g, RectangleF r, string id, Action click, bool pattern = false, bool lit = false, Action? hold = null)
+    {
+        bool hot = _hover == id, down = _pressed == id;
+        using (var p = Rounded(r, 6))
+        {
+            using (var b = new LinearGradientBrush(r, down ? Key2 : hot ? Color.FromArgb(0x36, 0x3B, 0x43) : Key1, down ? Key1 : Key2, 90f)) g.FillPath(b, p);
+            if (pattern)
+            {
+                var st = g.Save();
+                g.SetClip(p);
+                using var hatch = new HatchBrush(HatchStyle.WideUpwardDiagonal, Color.FromArgb(60, Lit), Color.Transparent);
+                g.FillPath(hatch, p);
+                g.Restore(st);
+            }
+            using var pen = new Pen(lit ? Lit : Color.FromArgb(0x05, 0x05, 0x06), lit ? 1.5f : 1.2f);
+            g.DrawPath(pen, p);
+        }
+        if (!down)
+            using (var hl = new Pen(Color.FromArgb(30, Color.White), 1)) g.DrawLine(hl, r.X + 6, r.Y + 1.5f, r.Right - 6, r.Y + 1.5f);
+        _hits.Add(new Hit(r, id, click, hold));
+    }
+
+    private static void Label(Graphics g, string s, float px, Color c, RectangleF r, StringAlignment align, bool bold = false)
+    {
+        using var f = new Font(bold ? "Segoe UI Semibold" : "Segoe UI", px, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var b = new SolidBrush(c);
+        using var fmt = new StringFormat(StringFormat.GenericTypographic) { Alignment = align, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+        float lh = f.GetHeight(g);
+        if (r.Height < lh + 2) r = new RectangleF(r.X, r.Y + r.Height / 2 - lh / 2 - 1, r.Width, lh + 2);
+        g.DrawString(s, f, b, r, fmt);
+    }
+
+    private static void SeekIcon(Graphics g, RectangleF r, int dir, Color c)
+    {
+        float cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2, s = 6;
+        using var b = new SolidBrush(c);
+        for (int k = 0; k < 2; k++)
+        {
+            float bx = cx + dir * (k * s - s);
+            g.FillPolygon(b, new[] { new PointF(bx, cy - s), new PointF(bx + dir * s, cy), new PointF(bx, cy + s) });
+        }
+        g.FillRectangle(b, dir > 0 ? cx + s : cx - s - 2, cy - s, 2, 2 * s);
+    }
+
+    private static void SpeakerIcon(Graphics g, RectangleF r, bool muted, Color c)
+    {
+        float cx = r.X + r.Width / 2 - 5, cy = r.Y + r.Height / 2;
+        using var b = new SolidBrush(c);
+        g.FillPolygon(b, new[] { new PointF(cx - 9, cy - 5), new PointF(cx - 3, cy - 5), new PointF(cx + 4, cy - 12), new PointF(cx + 4, cy + 12), new PointF(cx - 3, cy + 5), new PointF(cx - 9, cy + 5) });
+        using var pen = new Pen(muted ? Alert : c, 2.2f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        if (muted) { g.DrawLine(pen, cx + 10, cy - 6, cx + 20, cy + 6); g.DrawLine(pen, cx + 20, cy - 6, cx + 10, cy + 6); }
+        else { g.DrawArc(pen, cx - 1, cy - 7, 14, 14, -50, 100); g.DrawArc(pen, cx - 6, cy - 13, 26, 26, -50, 100); }
+    }
+
+    private static void PowerIcon(Graphics g, float cx, float cy, float r, Color c)
+    {
+        using var pen = new Pen(c, 2.2f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        g.DrawArc(pen, cx - r, cy - r, 2 * r, 2 * r, -60, 300);
+        g.DrawLine(pen, cx, cy - r - 2, cx, cy);
+    }
+
+    private static void BulbIcon(Graphics g, float cx, float cy, Color c)
+    {
+        using var pen = new Pen(c, 2.2f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        g.DrawEllipse(pen, cx - 9, cy - 15, 18, 18);
+        g.DrawLine(pen, cx - 5, cy + 7, cx + 5, cy + 7);
+        g.DrawLine(pen, cx - 4, cy + 11, cx + 4, cy + 11);
+        using var b = new SolidBrush(Color.FromArgb(90, c));
+        g.FillEllipse(b, cx - 6, cy - 12, 12, 12);
+    }
+
+    private static GraphicsPath Rounded(RectangleF r, float radius)
+    {
+        var p = new GraphicsPath();
+        float d = radius * 2;
+        p.AddArc(r.X, r.Y, d, d, 180, 90);
+        p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+        p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+        p.CloseFigure();
+        return p;
+    }
+
+    // ------------------------------------------------------------------ mouse
+
+    private PointF ToDesign(Point p) => new((p.X - _ox) / _scale, (p.Y - _oy) / _scale);
+    private Hit? HitAt(PointF p) => _hits.LastOrDefault(h => h.R.Contains(p));
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        var p = ToDesign(e.Location);
+        if (_knobDrag)
+        {
+            float dy = _knobStart.Y - p.Y;
+            if (Math.Abs(dy) > 3) _knobMoved = true;
+            if (_knobMoved) SetVolume(_knobStartVol + dy / 150f);
+            return;
+        }
+        var h = HitAt(p)?.Id;
+        if (h != _hover)
+        {
+            _hover = h;
+            Cursor = h != null ? Cursors.Hand : Cursors.Default;
+            Invalidate();
+        }
+    }
+
+    private void SetVolume(float v)
+    {
+        _c.SetVolume(v);
+        Flash($"VOL {Math.Round(_c.Settings.Volume * 40):0}", 1.0);
+    }
+
+    protected override void OnMouseLeave(EventArgs e) { _hover = null; Invalidate(); }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        Focus();
+        var p = ToDesign(e.Location);
+        var h = HitAt(p);
+        if (e.Button == MouseButtons.Right)
+        {
+            if (h?.Hold != null) { h.Hold(); Invalidate(); return; }
+            MenuRequested?.Invoke(e.Location);
+            return;
+        }
+        if (e.Button != MouseButtons.Left || h == null) return;
+        _pressed = h.Id;
+        _holdFired = false;
+        if (h.Id == "knob") { _knobDrag = true; _knobMoved = false; _knobStart = p; _knobStartVol = _c.Settings.Volume; }
+        else if (h.Hold != null) { _holdAction = h.Hold; _hold.Start(); }
+        Invalidate();
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        _hold.Stop();
+        var p = ToDesign(e.Location);
+        if (_knobDrag)
+        {
+            _knobDrag = false;
+            if (!_knobMoved) { _c.ToggleMute(); Flash(_c.Settings.Muted ? "MUTE" : "MUTE OFF", 1.0); }
+        }
+        else if (e.Button == MouseButtons.Left && !_holdFired)
+        {
+            var h = HitAt(p);
+            if (h != null && h.Id == _pressed) h.Click?.Invoke();
+        }
+        _pressed = null;
+        Invalidate();
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        var p = ToDesign(e.Location);
+        if (p.X < 268) SetVolume(_c.Settings.Volume + Math.Sign(e.Delta) * 0.025f);   // over the knob side: volume
+        else _c.Step(Math.Sign(e.Delta));                                              // over the display: tune
+        Invalidate();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) { _hold.Dispose(); _art?.Dispose(); }
+        base.Dispose(disposing);
+    }
+}
