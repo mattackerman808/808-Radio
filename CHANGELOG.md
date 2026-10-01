@@ -4,10 +4,11 @@
 
 - **Display reworked like a real head unit's:** a large dot-matrix line; a full-width small one with the band and
   frequency (`FM 107.7`, or the HD program you're hearing, `HD2 107.7`) and the clock; and a row of fixed status
-  lights, each lit or dark, nothing moving: **HD WEAK DGTL ST RDS · WX TRF SEEK P1–P6**, then the signal bars. The
-  HD1/HD2/… tags that came and went are gone; **BAND** steps through the HD programs (`HD2/3 CLASSIC ROCK`). The
-  "HD IN 12S" countdown text is folded into **WEAK**.
-- **HD WEAK** lights (and the instrument panel shows Sync "weak", Blend "HD too weak to play") when a station's HD
+  lights, each lit or dark, nothing moving: **HD**, **WEAK** (red), the classic interlocking-rings stereo indicator,
+  **RDS**, **SEEK**, **WX**, **TRAFFIC**, then the signal bars. The HD1/HD2/… tags that came and went are gone;
+  **BAND** steps through the HD programs (`HD2/3 CLASSIC ROCK`). DGTL is folded into HD (filled: digital audio), the
+  "HD IN 12S" countdown into WEAK, and the P1–P6 badge into the preset keys (the one you're on is outlined).
+- **WEAK** lights next to **HD** (and the instrument panel shows Sync "weak", Blend "HD too weak to play") when a station's HD
   is found, with its name and program list, but its bit error rate is too high for the audio to decode, so you're
   hearing the analog. Before, the HD badge and program tags suggested HD was playing.
 - **Network dongle recovers from a wedged rtl_tcp.** rtl_tcp can hang when a client disconnects (half-closed socket,

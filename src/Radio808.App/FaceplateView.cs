@@ -682,28 +682,24 @@ internal sealed class FaceplateView : Control
         DotMatrix.Draw(g, l2, 0, 292, 136, 3.1f, Line2Cells, lit, ghost, glow: false);   // ends ~776, left of the art square
 
         // line 3: the status lights, fixed legends printed on the glass like a real head unit's display: each is either
-        // lit or dark, and nothing moves. Signal bars at the right end.
+        // lit or dark, and nothing moves. HD WEAK · stereo RDS · SEEK · WX TRAFFIC, signal bars at the right end.
         float x = 292;
-        x = Indicator(g, x, 172, "HD", synced, playingHd, lit);   // outlined: found; filled: playing
-        // WEAK, right after HD so it reads "HD WEAK": HD found (name, programs) but the signal is too poor to play its
-        // audio, or it's holding off after dropouts until the signal is steady again
+        x = Indicator(g, x, 172, "HD", synced, playingHd, lit);   // outlined: found; filled: playing (digital audio)
+        // WEAK (red), right after HD so it reads "HD WEAK": HD found (name, programs) but the signal is too poor to play
+        // its audio, or it's holding off after dropouts until the signal is steady again
         bool weak = eng != null && !_c.Settings.ForceAnalog && (eng.HdTooWeak || synced && !playingHd && eng.Blender.RetryIn > 0.5);
-        x = Indicator(g, x, 172, "WEAK", weak, false, lit);
-        x = Indicator(g, x, 172, "DGTL", playingHd, playingHd, lit);
+        x = Indicator(g, x, 172, "WEAK", weak, weak, lit, Alert) + 10;
         bool stereo = eng != null && (playingHd || eng.Receiver.Stereo.PilotLocked && eng.Receiver.Stereo.Blend > 0.5f);
-        x = Indicator(g, x, 172, "ST", stereo, stereo, lit);
+        x = StereoIcon(g, x, 172, stereo, lit);
         bool rdsOn = rds?.Synced == true;
-        x = Indicator(g, x, 172, "RDS", rdsOn, rdsOn, lit) + 8;
+        x = Indicator(g, x, 172, "RDS", rdsOn, rdsOn, lit) + 10;
+        x = Indicator(g, x, 172, "SEEK", _c.Seeking, _c.Seeking, lit) + 10;
         bool wx = hd?.WeatherMap != null, trf = hd != null && hd.TrafficTiles.Any(t => t != null);
         float wxEnd = Indicator(g, x, 172, "WX", wx, false, lit);
         if (wx) _hits.Add(new Hit(new RectangleF(x - 2, 168, wxEnd - x, 22), "wx", () => MapRequested?.Invoke("weather")));
         x = wxEnd;
-        float trfEnd = Indicator(g, x, 172, "TRF", trf, false, lit);
+        float trfEnd = Indicator(g, x, 172, "TRAFFIC", trf, false, lit);
         if (trf) _hits.Add(new Hit(new RectangleF(x - 2, 168, trfEnd - x, 22), "trf", () => MapRequested?.Invoke("traffic")));
-        x = Indicator(g, trfEnd, 172, "SEEK", _c.Seeking, _c.Seeking, lit);
-        // preset slot: lit "P3" on a preset station, an unlit "P–" otherwise (a fixed spot, like a VFD's digit)
-        int preset = _c.Settings.Presets.FindIndex(p => p != null && Math.Abs(p.Mhz * 1e6 - freq) < 50_000);
-        Indicator(g, x, 172, preset >= 0 ? $"P{preset + 1}" : "P–", preset >= 0, preset >= 0, lit);
         // signal bars, right-aligned under the clock
         int bars = eng == null ? 0 : Math.Clamp((int)Math.Round((eng.Receiver.ChannelPowerDb + 52) / 8), 0, 5);
         for (int i = 0; i < 5; i++)
@@ -808,12 +804,24 @@ internal sealed class FaceplateView : Control
     }
 
     /// <summary>A small segment-style indicator: outlined when on, filled when active, ghosted when off.</summary>
-    private float Indicator(Graphics g, float x, float y, string text, bool on, bool active, Color lit)
+    /// <summary>The classic stereo indicator: two interlocking rings, lit in stereo.</summary>
+    private static float StereoIcon(Graphics g, float x, float y, bool on, Color lit)
+    {
+        using var pen = new Pen(on ? lit : Color.FromArgb(28, lit), 1.7f);
+        const float d = 13, overlap = 5;
+        g.DrawEllipse(pen, x + 1, y + 1.5f, d, d);
+        g.DrawEllipse(pen, x + 1 + d - overlap, y + 1.5f, d, d);
+        return x + 2 + 2 * d - overlap + 8;
+    }
+
+    /// <param name="onColor">Color when lit, if not the illumination (e.g. red for WEAK); unlit legends are always a
+    /// faint trace of the illumination, like the rest of the glass.</param>
+    private float Indicator(Graphics g, float x, float y, string text, bool on, bool active, Color lit, Color? onColor = null)
     {
         using var f = new Font("Segoe UI Semibold", 10.5f, FontStyle.Regular, GraphicsUnit.Pixel);
         float w = g.MeasureString(text, f, PointF.Empty, StringFormat.GenericTypographic).Width + 10;
         var r = new RectangleF(x, y, w, 16);
-        var c = on ? lit : Color.FromArgb(28, lit);
+        var c = on ? onColor ?? lit : Color.FromArgb(28, lit);
         if (active) { using var b = new SolidBrush(c); using var p = Rounded(r, 3); g.FillPath(b, p); }
         else { using var pen = new Pen(c, 1.1f); using var p = Rounded(r, 3); g.DrawPath(pen, p); }
         using var tb = new SolidBrush(active ? Color.Black : c);
@@ -857,13 +865,15 @@ internal sealed class FaceplateView : Control
             var r = new RectangleF(x0 + i * (w + gap), y, w, h);
             int idx = i;
             var p = _c.Settings.Presets[i];
+            // the preset you're on is outlined in the illumination color, its frequency lit
+            bool current = p != null && Math.Abs(p.Mhz * 1e6 - _c.Frequency) < 50_000;
             Key(g, r, "preset" + i, () =>
             {
                 if (_c.Settings.Presets[idx] == null) { Flash($"HOLD {idx + 1} TO SAVE"); return; }
                 _c.RecallPreset(idx);
-            }, hold: () => { StorePreset(idx); Flash($"P{idx + 1} SAVED"); });
+            }, lit: current, hold: () => { StorePreset(idx); Flash($"P{idx + 1} SAVED"); });
             Label(g, (i + 1).ToString(), 15, lit, new RectangleF(r.X + 8, r.Y, 20, h), StringAlignment.Near, bold: true);
-            if (p != null) Label(g, p.Mhz.ToString("0.0"), 10.5f, Grey, new RectangleF(r.X + 26, r.Y, r.Width - 32, h), StringAlignment.Far);
+            if (p != null) Label(g, p.Mhz.ToString("0.0"), 10.5f, current ? lit : Grey, new RectangleF(r.X + 26, r.Y, r.Width - 32, h), StringAlignment.Far);
         }
     }
 
