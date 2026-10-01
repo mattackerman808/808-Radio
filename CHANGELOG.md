@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-10-01)
 
 - **A tuning knob** on the right of the faceplate, under the signal meter, mirroring the volume knob like the classic
   two-knob head units: turn it (drag around it) to step a channel per notch, the frequency flashing on the display;
