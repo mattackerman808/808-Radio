@@ -52,8 +52,10 @@ public sealed class RadioEngine : IDisposable
         _rx.Audio += a =>
         {
             _blender.Process(a);
+            TrackLevels(a);
             _player.Write(a);
         };
+        _rx.Mpx += CaptureMpx;
         _dev.Samples += OnSamples;
         _dev.Stopped += m => DeviceStopped?.Invoke(m);
     }
@@ -192,7 +194,86 @@ public sealed class RadioEngine : IDisposable
         return true;
     }
 
+    // ---- more taps for the advanced panel ----
+
+    private readonly float[] _mpxBuf = new float[SpectrumSize];
+    private int _mpxFill;
+    private readonly object _mpxLock = new();
+    private float _peakL, _peakR;
+    private long _dspTicks, _dspStart = System.Diagnostics.Stopwatch.GetTimestamp();
+    private double _dspLoad;
+
+    private void CaptureMpx(ReadOnlySpan<float> mpx)
+    {
+        if (_mpxFill >= SpectrumSize) return;
+        lock (_mpxLock)
+        {
+            int n = Math.Min(mpx.Length, SpectrumSize - _mpxFill);
+            mpx.Slice(0, n).CopyTo(_mpxBuf.AsSpan(_mpxFill));
+            _mpxFill += n;
+        }
+    }
+
+    /// <summary>Copies 4096 MPX samples (at <see cref="FmReceiver.MpxRate"/>) into <paramref name="dest"/> if ready.</summary>
+    public bool TryGetMpxBlock(float[] dest)
+    {
+        if (Volatile.Read(ref _mpxFill) < SpectrumSize) return false;
+        lock (_mpxLock)
+        {
+            Array.Copy(_mpxBuf, dest, Math.Min(dest.Length, SpectrumSize));
+            _mpxFill = 0;
+        }
+        return true;
+    }
+
+    private float _rmsL, _rmsR;
+
+    private void TrackLevels(Span<float> a)
+    {
+        float l = 0, r = 0;
+        double sl = 0, sr = 0;
+        for (int i = 0; i < a.Length; i += 2)
+        {
+            l = Math.Max(l, Math.Abs(a[i])); r = Math.Max(r, Math.Abs(a[i + 1]));
+            sl += a[i] * a[i]; sr += a[i + 1] * a[i + 1];
+        }
+        int n = Math.Max(1, a.Length / 2);
+        // VU-like ballistics: ~300 ms integration for RMS; peaks attack instantly and fall back over ~1.5 s
+        float k = Math.Min(1f, (float)(n / FmReceiver.AudioRate / 0.3));
+        _rmsL += k * ((float)Math.Sqrt(sl / n) - _rmsL);
+        _rmsR += k * ((float)Math.Sqrt(sr / n) - _rmsR);
+        float fall = (float)Math.Pow(0.1, n / FmReceiver.AudioRate / 1.5);
+        _peakL = Math.Max(l, _peakL * fall);
+        _peakR = Math.Max(r, _peakR * fall);
+    }
+
+    /// <summary>Audio levels after the HD blend, before volume: RMS (VU-like) and decaying peaks, linear 0..1+.</summary>
+    public (float RmsL, float RmsR, float PeakL, float PeakR) Levels => (_rmsL, _rmsR, _peakL, _peakR);
+
+    /// <summary>Fraction of one core spent in DSP on the device thread (excludes nrsc5's own thread).</summary>
+    public double DspLoad
+    {
+        get
+        {
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            double elapsed = (now - _dspStart) / (double)System.Diagnostics.Stopwatch.Frequency;
+            if (elapsed > 1)
+            {
+                _dspLoad = Interlocked.Exchange(ref _dspTicks, 0) / (double)System.Diagnostics.Stopwatch.Frequency / elapsed;
+                _dspStart = now;
+            }
+            return _dspLoad;
+        }
+    }
+
     private void OnSamples(ReadOnlySpan<float> iq)
+    {
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        try { ProcessSamples(iq); }
+        finally { Interlocked.Add(ref _dspTicks, System.Diagnostics.Stopwatch.GetTimestamp() - t0); }
+    }
+
+    private void ProcessSamples(ReadOnlySpan<float> iq)
     {
         int gen = _retuneGeneration;
         if (gen != _appliedGeneration)

@@ -19,8 +19,23 @@ namespace Radio808.App;
 /// </summary>
 internal sealed class FaceplateView : Control
 {
-    private const float W = 1000, H = 300;
+    private const float W = 1000, ClosedH = 300, OpenH = 570;
     private const int MainCells = 13;
+    private float H => _open || _anim > 0 ? OpenH : ClosedH;
+
+    // flip-down faceplate: _anim 0 = closed, 1 = fully open
+    private bool _open;
+    private float _anim;
+    private readonly Timer _animTimer = new() { Interval = 15 };
+    private readonly NerdPanel _nerd;
+
+    /// <summary>Raised before opening (true) and after closing (false): the window should change height.</summary>
+    public event Action<bool>? OpenLayout;
+    public bool IsOpen => _open;
+    /// <summary>Current design canvas height (the window keeps W:H).</summary>
+    public float DesignHeight => H;
+    /// <summary>The window's shape for the current state, in design coordinates.</summary>
+    public RectangleF CurrentOutline => H > ClosedH ? new RectangleF(12, 14, 976, 546) : Outline;
 
     public static readonly (string Name, Color Color)[] Illuminations =
     {
@@ -98,6 +113,27 @@ internal sealed class FaceplateView : Control
             _holdAction?.Invoke();
             Invalidate();
         };
+        _nerd = new NerdPanel(c);
+        _animTimer.Tick += (_, _) =>
+        {
+            float step = 15f / 380f;
+            _anim = _open ? Math.Min(1, _anim + step) : Math.Max(0, _anim - step);
+            if (_open && _anim >= 1 || !_open && _anim <= 0)
+            {
+                _animTimer.Stop();
+                if (!_open) OpenLayout?.Invoke(false);   // fully folded back up: shrink the window
+            }
+            Invalidate();
+        };
+    }
+
+    /// <summary>Flips the faceplate down to reveal the instrument panel, or back up.</summary>
+    public void ToggleOpen()
+    {
+        if (_animTimer.Enabled) return;
+        _open = !_open;
+        if (_open) OpenLayout?.Invoke(true);   // grow the window first, then fold the faceplate down
+        _animTimer.Start();
     }
 
     private Color Lit => Illuminations[Math.Clamp(_c.Settings.Illumination, 0, Illuminations.Length - 1)].Color;
@@ -115,6 +151,7 @@ internal sealed class FaceplateView : Control
     public void Tick()
     {
         PullSpectrum();
+        if (_open) _nerd.Tick(_c.Engine);
         // marquee: hold 2 s at the start, then one character every 300 ms, a gap, and around again
         int len = _mainCols.Count / DotMatrix.CellCols;
         if (len > MainCells)
@@ -136,6 +173,7 @@ internal sealed class FaceplateView : Control
         if (eng == null) { _specValid = false; return; }
         if (!eng.TryGetSpectrumBlock(_specIq)) return;
         _fft.PowerDb(_specIq, _re, _im, _db);
+        _nerd.AddBaseband(_db);
         int per = 4096 / Bars;
         var v = new float[Bars];
         for (int b = 0; b < Bars; b++)
@@ -170,12 +208,83 @@ internal sealed class FaceplateView : Control
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         _hits.Clear();
 
+        if (H > ClosedH)
+        {
+            DrawChassis(g);
+            if (_anim < 1)
+            {
+                // the faceplate folding down: it slides to the hinge at the bottom and flattens toward edge-on
+                float t = _anim * _anim * (3 - 2 * _anim);   // smoothstep
+                float top = 524 * t, height = ClosedH * (1 - t) + 34 * t;
+                var st = g.Save();
+                g.TranslateTransform(0, top);
+                g.ScaleTransform(1, height / ClosedH);
+                DrawFaceplate(g);
+                using (var shade = new SolidBrush(Color.FromArgb((int)(170 * t), 0, 0, 0)))
+                using (var p = Rounded(Outline, OutlineRadius)) g.FillPath(shade, p);
+                g.Restore(st);
+                _hits.Clear();   // nothing is clickable mid-flip
+            }
+            return;
+        }
+        DrawFaceplate(g);
+    }
+
+    private void DrawFaceplate(Graphics g)
+    {
         DrawBody(g);
         DrawLeftKeys(g);
         DrawKnob(g);
         DrawDisplay(g);
         DrawKeyStrip(g);
         DrawRightSide(g);
+    }
+
+    /// <summary>Open: the chassis behind the faceplate, with the instrument panel and the folded faceplate's lip.</summary>
+    private void DrawChassis(Graphics g)
+    {
+        var lit = Lit;
+        var outer = new RectangleF(12, 14, 976, 546);
+        using (var p = Rounded(outer, OutlineRadius))
+        {
+            using (var b = new LinearGradientBrush(outer, Color.FromArgb(0x1C, 0x1F, 0x24), Color.FromArgb(0x0A, 0x0B, 0x0D), 90f)) g.FillPath(b, p);
+            using var pen = new Pen(Color.FromArgb(0x48, 0x4E, 0x57), 1.5f);
+            g.DrawPath(pen, p);
+        }
+        // screws in the corners of the mechanism
+        foreach (var (sx, sy) in new[] { (30f, 32f), (970f, 32f), (30f, 508f), (970f, 508f) })
+        {
+            using var b = new SolidBrush(Color.FromArgb(0x2C, 0x30, 0x36));
+            g.FillEllipse(b, sx - 5, sy - 5, 10, 10);
+            using var pen = new Pen(Color.FromArgb(0x0C, 0x0D, 0x0F), 1.4f);
+            g.DrawLine(pen, sx - 3, sy, sx + 3, sy);
+        }
+        var panel = new RectangleF(44, 26, 912, 490);
+        using (var p = Rounded(panel, 8))
+        {
+            using (var b = new SolidBrush(Color.FromArgb(0x05, 0x08, 0x0A))) g.FillPath(b, p);
+            using var pen = new Pen(Color.FromArgb(0x22, 0x28, 0x2F), 1.5f);
+            g.DrawPath(pen, p);
+        }
+        if (_anim > 0.6f) _nerd.Draw(g, panel, lit);
+
+        // the folded faceplate's lip along the bottom; click it to close
+        if (_anim >= 1)
+        {
+            var lip = new RectangleF(24, 524, 952, 30);
+            bool hot = _hover == "closeface";
+            using (var p = Rounded(lip, 8))
+            {
+                using (var b = new LinearGradientBrush(lip, hot ? Color.FromArgb(0x3A, 0x3F, 0x47) : Body1, Body2, 90f)) g.FillPath(b, p);
+                using var pen = new Pen(Color.FromArgb(0x05, 0x05, 0x06), 1.2f);
+                g.DrawPath(pen, p);
+            }
+            using (var hl = new Pen(Color.FromArgb(40, Color.White), 1)) g.DrawLine(hl, lip.X + 10, lip.Y + 1.5f, lip.Right - 10, lip.Y + 1.5f);
+            Label(g, "▲  CLOSE FACEPLATE", 11, lit, lip, StringAlignment.Center, bold: true);
+            _hits.Add(new Hit(lip, "closeface", ToggleOpen));
+            WindowKey(g, new RectangleF(924, 531, 18, 16), "min", () => MinimizeRequested?.Invoke(), close: false);
+            WindowKey(g, new RectangleF(948, 531, 18, 16), "close", () => CloseRequested?.Invoke(), close: true);
+        }
     }
 
     private void DrawBody(Graphics g)
@@ -199,6 +308,22 @@ internal sealed class FaceplateView : Control
         // brand above the display, model name at the right
         BrandMark.Draw(g, 538, 32, 20, Silver);
         Label(g, "HD-808", 9.5f, Grey, new RectangleF(800, 32, 92, 20), StringAlignment.Far);
+
+        // OPEN: flips the faceplate down (where a head unit has its open/eject key)
+        var open = new RectangleF(272, 34, 40, 16);
+        bool hotOpen = _hover == "open";
+        using (var p = Rounded(open, 4))
+        {
+            using var b = new SolidBrush(hotOpen ? Color.FromArgb(0x3A, 0x40, 0x48) : Color.FromArgb(0x16, 0x18, 0x1C));
+            g.FillPath(b, p);
+        }
+        using (var b = new SolidBrush(Lit))
+        {
+            float cx = open.X + open.Width / 2, cy = open.Y + 7;
+            g.FillPolygon(b, new[] { new PointF(cx - 5, cy + 2), new PointF(cx + 5, cy + 2), new PointF(cx, cy - 3) });
+            g.FillRectangle(b, cx - 5, cy + 4, 10, 1.6f);
+        }
+        _hits.Add(new Hit(open, "open", ToggleOpen));
 
         // window keys (the window has no frame): minimize and close, top right
         WindowKey(g, new RectangleF(926, 34, 18, 16), "min", () => MinimizeRequested?.Invoke(), close: false);

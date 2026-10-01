@@ -40,6 +40,9 @@ public sealed class FmReceiver
     public event BasebandHandler? Baseband;
     /// <summary>Stereo audio at <see cref="AudioRate"/>.</summary>
     public event AudioHandler? Audio;
+    /// <summary>FM multiplex (normalized deviation) at <see cref="MpxRate"/>, for displays.</summary>
+    internal event MpxHandler? Mpx;
+    internal delegate void MpxHandler(ReadOnlySpan<float> mpx);
 
     public FmReceiver(double deemphasisUs = 75, double channelPassHz = 100_000, int eqTaps = 16, float eqMu = 2e-4f)
     {
@@ -102,6 +105,7 @@ public sealed class FmReceiver
         Ensure(ref _mpx2, _mpxDec.MaxOutput(nc));
         int nm = _mpxDec.Process(_mpx.AsSpan(0, nc), _mpx2);
         _rds.Process(_mpx2.AsSpan(0, nm));
+        Mpx?.Invoke(_mpx2.AsSpan(0, nm));
         Ensure(ref _audio, 2 * _stereo.MaxOutputFrames(nm));
         int frames = _stereo.Process(_mpx2.AsSpan(0, nm), _audio);
         Audio?.Invoke(_audio.AsSpan(0, 2 * frames));

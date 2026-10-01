@@ -30,6 +30,17 @@ public sealed class CmaEqualizer
     }
 
     public bool Enabled { get; set; } = true;
+    public int TapCount => _taps;
+
+    /// <summary>Envelope ripple, smoothed over ~0.5 s (for displays; doesn't disturb <see cref="TakeEnvelopeRipple"/>).</summary>
+    public double Ripple { get; private set; }
+
+    /// <summary>Copies the tap magnitudes (the multipath profile) into <paramref name="mag"/>.</summary>
+    public void CopyTapMagnitudes(float[] mag)
+    {
+        for (int k = 0; k < Math.Min(_taps, mag.Length); k++)
+            mag[k] = MathF.Sqrt(_wr[k] * _wr[k] + _wi[k] * _wi[k]);
+    }
 
     /// <summary>Envelope ripple (std dev of |y|^2 around 1) since the last call; ~0 for a clean FM signal.</summary>
     public double TakeEnvelopeRipple()
@@ -44,6 +55,7 @@ public sealed class CmaEqualizer
     {
         int t = _taps;
         float mu = _mu;
+        double blockAcc = 0;
         if (_agc < 0 && re.Length > 0)
         {
             // seed the level from this block, so a strong signal doesn't enter the filter 30x too large
@@ -74,6 +86,7 @@ public sealed class CmaEqualizer
             float mag2 = yr * yr + yi * yi;
             float d = Math.Clamp(mag2 - 1, -2f, 2f);   // clipped so impulsive noise can't kick the weights
             _envVarAcc += d * d; _envCount++;
+            blockAcc += d * d;
             if (Enabled)
             {
                 // CMA update: w -= mu * e * conj(x), e = y (|y|^2 - 1)
@@ -90,6 +103,11 @@ public sealed class CmaEqualizer
             {
                 re[n] = pr; im[n] = pim;
             }
+        }
+        if (re.Length > 0)
+        {
+            double r = Math.Sqrt(blockAcc / re.Length);
+            Ripple = Ripple == 0 ? r : Ripple + Math.Min(1, re.Length / 186_000.0) * (r - Ripple);
         }
         if (!float.IsFinite(_wr[_center]) || !float.IsFinite(_agc)) Reset();   // never let a blow-up stick
     }

@@ -46,6 +46,12 @@ internal sealed class MainForm : Form
         _view.MinimizeRequested += () => WindowState = FormWindowState.Minimized;
         _view.CloseRequested += Close;
         _view.IsResizeBorder = p => EdgeHit(p) != 0;
+        _view.OpenLayout += _ =>
+        {
+            // the window grows downward when the faceplate opens and shrinks back when it closes
+            ClientSize = new Size(ClientSize.Width, (int)Math.Round(ClientSize.Width * DesignH / DesignW));
+            UpdateShape();
+        };
         Controls.Add(_view);
         Resize += (_, _) => UpdateShape();
 
@@ -72,7 +78,8 @@ internal sealed class MainForm : Form
     // ---- frameless window: shape, move, resize with a locked aspect ratio ----
 
     private const int WM_NCLBUTTONDOWN = 0xA1, WM_NCHITTEST = 0x84, WM_SIZING = 0x214, HTCAPTION = 2;
-    private const float DesignW = 1000, DesignH = 300;
+    private const float DesignW = 1000;
+    private float DesignH => _view.DesignHeight;
 
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool ReleaseCapture();
     [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
@@ -104,7 +111,7 @@ internal sealed class MainForm : Form
     {
         if (WindowState == FormWindowState.Minimized || ClientSize.Width == 0) return;
         float s = FaceScale;
-        var o = FaceplateView.Outline;
+        var o = _view.CurrentOutline;
         using var path = FaceplateView.Rounded(new RectangleF(o.X * s, o.Y * s, o.Width * s, o.Height * s), FaceplateView.OutlineRadius * s);
         var old = Region;
         Region = new Region(path);
@@ -115,7 +122,7 @@ internal sealed class MainForm : Form
     private int EdgeHit(Point p)
     {
         float s = FaceScale, band = 9 * s;
-        var o = FaceplateView.Outline;
+        var o = _view.CurrentOutline;
         float l = o.Left * s, t = o.Top * s, r = o.Right * s, b = o.Bottom * s;
         bool left = p.X < l + band, right = p.X > r - band, top = p.Y < t + band, bottom = p.Y > b - band;
         if (top && left) return 13;
@@ -186,6 +193,7 @@ internal sealed class MainForm : Form
                 _view.Flash(_c.Settings.ForceAnalog ? "SOURCE FM" : "SOURCE HD");
                 return true;
             case Keys.H: _view.NextProgram(); return true;
+            case Keys.O: _view.ToggleOpen(); return true;
             case Keys.C: _view.CycleColor(); return true;
             case Keys.D:
                 _c.Settings.DisplayMode = (_c.Settings.DisplayMode + 1) % 3;
@@ -231,6 +239,7 @@ internal sealed class MainForm : Form
             disp.DropDownItems.Add(new ToolStripMenuItem(modes[i], null, (_, _) => _c.Settings.DisplayMode = idx) { Checked = _c.Settings.DisplayMode == i });
         }
         m.Items.Add(disp);
+        m.Items.Add(new ToolStripMenuItem(_view.IsOpen ? "Close faceplate" : "Open faceplate (signal details)", null, (_, _) => _view.ToggleOpen()));
         m.Items.Add(new ToolStripSeparator());
         m.Items.Add(new ToolStripMenuItem("Auto HD", null, (_, _) => _c.SetForceAnalog(!_c.Settings.ForceAnalog)) { Checked = !_c.Settings.ForceAnalog });
         m.Items.Add(new ToolStripMenuItem("Multipath equalizer", null, (_, _) => _c.SetEqualizer(!_c.Settings.Equalizer)) { Checked = _c.Settings.Equalizer });
