@@ -88,7 +88,7 @@ internal sealed class MainForm : Form
     private async System.Threading.Tasks.Task RunBench(double seconds, string report, int width)
     {
         if (width > 0) ClientSize = new Size(width, (int)Math.Round(width * DesignH / DesignW));
-        _view.ToggleOpen();
+        if (Environment.GetEnvironmentVariable("R808_BENCH_CLOSED") != "1") _view.ToggleOpen();   // =1: time the faceplate
         await System.Threading.Tasks.Task.Delay(3000);   // the flip, and the waterfall filling
         _view.Timing.Reset();
         await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(seconds));

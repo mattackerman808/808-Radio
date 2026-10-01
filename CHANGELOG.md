@@ -11,7 +11,10 @@
   draws the rest, the flip animation, and everything if Direct3D isn't available (then at up to 60 fps, paced off
   the display). Also fixed for all painting: WinForms allocated a new full-window back buffer on every paint (its
   default MaximumBuffer is 225 x 96), ~4 ms a frame at 4K.
+- The faceplate's spectrum analyzer (the art square, when there's no album art) runs at 60 fps instead of 10, with a
+  steady time-based fall; its frames repaint just that square (the rest of the faceplate stays at 10 Hz).
 - `808Radio.exe --bench <recordings> <seconds> <report> [width] [fps]`: paint timings with the panel open.
+  `R808_BENCH_CLOSED=1` times the faceplate instead.
 
 ## 0.2.0 (2026-10-01)
 

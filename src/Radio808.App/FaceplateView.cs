@@ -150,6 +150,13 @@ internal sealed class FaceplateView : Control
         Controls.Add(_gpu);
         _pacer = new FramePacer(this, () =>
         {
+            if (FaceplateLive)
+            {
+                // closed: the analyzer at the frame rate (the rest of the faceplate updates on the 100 ms tick)
+                PullSpectrum();
+                if (_analyzerShown) { Invalidate(AnalyzerPixels); Update(); }
+                return;
+            }
             if (!PanelLive) { _pacer!.Stop(); return; }
             _nerd.FrameTick(_c.Engine);
             InvalidateDesign(_nerd.FastRects);
@@ -169,6 +176,7 @@ internal sealed class FaceplateView : Control
                 else
                 {
                     OpenLayout?.Invoke(false);   // fully folded back up: shrink the window
+                    StartFaceplateFrames();
                     _chassisBg?.Dispose();
                     _chassisBg = null;
                 }
@@ -182,7 +190,7 @@ internal sealed class FaceplateView : Control
     {
         if (_animTimer.Enabled) return;
         _open = !_open;
-        if (_open) OpenLayout?.Invoke(true);   // grow the window first, then fold the faceplate down
+        if (_open) { _pacer.Stop(); OpenLayout?.Invoke(true); }   // grow the window first, then fold the faceplate down
         else StopPanelFrames();                // GDI+ draws the panel while it folds away
         _animTimer.Start();
     }
@@ -251,6 +259,21 @@ internal sealed class FaceplateView : Control
     /// <summary>The panel is fully open (not mid-flip).</summary>
     private bool PanelLive => _open && _anim >= 1;
 
+    /// <summary>The faceplate is up (not open, not mid-flip).</summary>
+    private bool FaceplateLive => !_open && _anim <= 0;
+
+    /// <summary>Runs the faceplate's analyzer at up to 60 fps (GDI+: it repaints just that square).</summary>
+    private void StartFaceplateFrames()
+    {
+        if (FaceplateLive) _pacer.Start(60);
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        StartFaceplateFrames();
+    }
+
     /// <summary>Invalidates design-coordinate rectangles (a pixel of margin for anti-aliasing).</summary>
     private void InvalidateDesign(RectangleF[] rects)
     {
@@ -283,7 +306,7 @@ internal sealed class FaceplateView : Control
             else _slowDue = true;
             return;
         }
-        PullSpectrum();
+        if (!_pacer.Running) PullSpectrum();   // (the pacer does it per frame while the faceplate is up)
         if (_open) _nerd.Tick(_c.Engine);
         // marquee: hold 2 s at the start, then one character every 300 ms, a gap, and around again
         int len = _mainCols.Count / DotMatrix.CellCols;
@@ -316,13 +339,20 @@ internal sealed class FaceplateView : Control
             v[b] = 10 * MathF.Log10(sum / per);
         }
         float floor = v.Min();
+        // instant attack, steady fall (full height in 1.25 s), by time so it looks the same at any frame rate
+        double now = _barClock.Elapsed.TotalSeconds;
+        float fall = (float)(0.8 * Math.Clamp(now - _barsAt, 0, 0.25));
+        _barsAt = now;
         for (int b = 0; b < Bars; b++)
         {
             float level = Math.Clamp((v[b] - floor) / 30f, 0, 1);
-            _bars[b] = _specValid ? Math.Max(level, _bars[b] - 0.08f) : level;   // fast attack, slow fall
+            _bars[b] = _specValid ? Math.Max(level, _bars[b] - fall) : level;
         }
         _specValid = true;
     }
+
+    private readonly System.Diagnostics.Stopwatch _barClock = System.Diagnostics.Stopwatch.StartNew();
+    private double _barsAt;
 
     // ------------------------------------------------------------------ painting
 
@@ -334,6 +364,14 @@ internal sealed class FaceplateView : Control
         if (_scale <= 0) { g.Clear(Background); return; }
         _ox = (Width - W * _scale) / 2;
         _oy = (Height - H * _scale) / 2;
+        // closed, and only the analyzer moved (its fast frames): repaint just that square
+        if (H <= ClosedH && AnalyzerPixels.Contains(e.ClipRectangle))
+        {
+            g.TranslateTransform(_ox, _oy);
+            g.ScaleTransform(_scale, _scale);
+            PaintAnalyzerOnly(g);
+            return;
+        }
         // open: the chassis behind the panel never changes, so it's drawn once per window size and copied after that
         if (H > ClosedH)
         {
@@ -695,23 +733,45 @@ internal sealed class FaceplateView : Control
             g.DrawImage(art, sq.X + (sq.Width - art.Width * s) / 2, sq.Y + (sq.Height - art.Height * s) / 2, art.Width * s, art.Height * s);
             g.Restore(st);
         }
-        else
+        else DrawAnalyzer(g, lit);
+        _analyzerShown = art == null;
+    }
+
+    /// <summary>The display's art square: album art / station logo when HD has one, else this bar-graph spectrum.</summary>
+    private static readonly RectangleF AnalyzerArea = new(800, 64, 104, 104);
+    private static readonly RectangleF Glass = new(272, 56, 640, 142);
+    private bool _analyzerShown;
+
+    private void DrawAnalyzer(Graphics g, Color lit)
+    {
+        var sq = AnalyzerArea;
+        var ghost = Color.FromArgb(20, lit);
+        float bw = sq.Width / Bars;
+        int segs = 13;
+        float sh = sq.Height / segs;
+        using var on1 = new SolidBrush(Color.FromArgb(255, lit));
+        using var on2 = new SolidBrush(Color.FromArgb(170, lit));
+        using var off = new SolidBrush(ghost);
+        for (int b = 0; b < Bars; b++)
         {
-            float bw = sq.Width / Bars;
-            int segs = 13;
-            float sh = sq.Height / segs;
-            for (int b = 0; b < Bars; b++)
-            {
-                int litSegs = _specValid ? (int)Math.Round(_bars[b] * segs) : 0;
-                for (int s = 0; s < segs; s++)
-                {
-                    bool on = s < litSegs;
-                    using var br = new SolidBrush(on ? Color.FromArgb(b is >= 5 and <= 10 ? 255 : 170, lit) : ghost);
-                    g.FillRectangle(br, sq.X + b * bw + 1, sq.Bottom - (s + 1) * sh + 1, bw - 2, sh - 2);
-                }
-            }
+            int litSegs = _specValid ? (int)Math.Round(_bars[b] * segs) : 0;
+            for (int s = 0; s < segs; s++)
+                g.FillRectangle(s < litSegs ? (b is >= 5 and <= 10 ? on1 : on2) : off, sq.X + b * bw + 1, sq.Bottom - (s + 1) * sh + 1, bw - 2, sh - 2);
         }
     }
+
+    /// <summary>A frame that only moves the analyzer: repaint the glass under it and the bars, nothing else.</summary>
+    private void PaintAnalyzerOnly(Graphics g)
+    {
+        var r = RectangleF.Inflate(AnalyzerArea, 1, 1);
+        using (var b = new LinearGradientBrush(Glass, Color.FromArgb(0x07, 0x0C, 0x0F), Color.FromArgb(0x02, 0x04, 0x05), 90f))
+            g.FillRectangle(b, r);
+        DrawAnalyzer(g, Lit);
+    }
+
+    private Rectangle AnalyzerPixels => Rectangle.FromLTRB(
+        (int)Math.Floor(_ox + (AnalyzerArea.Left - 1) * _scale), (int)Math.Floor(_oy + (AnalyzerArea.Top - 1) * _scale),
+        (int)Math.Ceiling(_ox + (AnalyzerArea.Right + 1) * _scale), (int)Math.Ceiling(_oy + (AnalyzerArea.Bottom + 1) * _scale));
 
     private string MainText(RadioEngine? eng, HdStatus? hd, RdsStatus? rds, bool synced, string mhz, out bool alert)
     {
