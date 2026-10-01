@@ -56,13 +56,15 @@ internal sealed class NerdPanel : IDisposable
     {
         CheckRetune();
         if (DateTime.UtcNow < _ignoreRowsUntil) return;   // samples still in flight from the old frequency
-        int per = db.Length / SpecW;
+        // each column covers its exact share of the bins (4096 / 592 isn't an integer; truncating it squeezed the
+        // spectrum toward the left and put the signal ~100 kHz off its markers)
         var row = new float[SpecW];
         for (int c = 0; c < SpecW; c++)
         {
+            int k0 = (int)((long)c * db.Length / SpecW), k1 = Math.Max(k0 + 1, (int)((long)(c + 1) * db.Length / SpecW));
             float sum = 0;
-            for (int k = 0; k < per; k++) sum += MathF.Pow(10, db[c * per + k] / 10);
-            row[c] = 10 * MathF.Log10(sum / per + 1e-20f);
+            for (int k = k0; k < k1; k++) sum += MathF.Pow(10, db[k] / 10);
+            row[c] = 10 * MathF.Log10(sum / (k1 - k0) + 1e-20f);
             _spec[c] = _specValid ? _spec[c] + 0.4f * (row[c] - _spec[c]) : row[c];
         }
         _specValid = true;
