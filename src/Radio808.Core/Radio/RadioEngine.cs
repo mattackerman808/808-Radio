@@ -113,8 +113,18 @@ public sealed class RadioEngine : IDisposable
     /// </summary>
     public const float HdWeakBer = 0.01f;
 
-    /// <summary>HD is synced (name, programs) but too weak to play its audio.</summary>
-    public bool HdTooWeak => _hd.Status.Synced && _hd.Status.Ber > HdWeakBer && !_blender.PlayingHd;
+    /// <summary>
+    /// HD is synced (name, programs) but too weak to play its audio: judged on the median bit error rate of the last few frames, and only
+    /// once it's been synced a while (the first frames after sync, or a single bad frame, can be rough on any station).
+    /// </summary>
+    public bool HdTooWeak
+    {
+        get
+        {
+            var s = _hd.Status;
+            return s.Synced && DateTime.UtcNow - s.SyncedAt > TimeSpan.FromSeconds(8) && s.BerAvg > HdWeakBer && !_blender.PlayingHd;
+        }
+    }
     public HdDecoder HdDecoder => _hd;
 
     /// <summary>Station frequency in Hz. Setting it retunes immediately.</summary>

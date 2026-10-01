@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-01)
 
 - **Display reworked like a real head unit's:** a large dot-matrix line and a full-width small one with the clock;
   **DISP** steps through what they show (song / station, station / song, station / genre, artist / title,
@@ -26,6 +26,12 @@
 - **WEAK** lights next to **HD** (and the instrument panel shows Sync "weak", Blend "HD too weak to play") when a station's HD
   is found, with its name and program list, but its bit error rate is too high for the audio to decode, so you're
   hearing the analog. Before, the HD badge and program tags suggested HD was playing.
+- **Automatic frequency correction no longer wanders.** It applied single readings, which through rtl_tcp vary by
+  about +-4 ppm from one to the next; over many restarts that walked the setting to +22 ppm (2 kHz off-tune, hurting
+  HD). It now takes 9 readings over ~30 s, applies their median only if they agree (and at most 10 ppm at a time),
+  and logs each decision to 808Radio.log. (A setting that already wandered: right-click, Frequency correction, Reset.)
+- WEAK judges the median bit error rate of the last few HD frames, from 8 s after sync, ignoring the first frame:
+  rough frames right after a sync no longer light it.
 - **Network dongle recovers from a wedged rtl_tcp.** rtl_tcp can hang when a client disconnects (half-closed socket,
   a spinning CPU, sometimes a stuck dongle). The Pi setup now installs `rtl-tcp-watchdog.service`, which restarts
   rtl_tcp and resets the dongle's USB connection when that happens; 808 Radio also reconnects if the stream trickles

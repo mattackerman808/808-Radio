@@ -156,7 +156,7 @@ public sealed class RadioController : IDisposable
         if (rtlTcpAddress != null) Settings.RtlTcpAddress = rtlTcpAddress.Trim();
         Settings.Save();
         StopEngine();
-        _ppmDone = false; _ppmRounds = 0;   // a different dongle has its own crystal error
+        _ppmDone = false; _ppmRounds = 0; _ppmReadings.Clear();   // a different dongle has its own crystal error
         await StartAsync();
     }
 
@@ -329,18 +329,46 @@ public sealed class RadioController : IDisposable
     private bool _ppmDone;
     private int _ppmRounds;
 
+    private readonly System.Collections.Generic.List<double> _ppmReadings = new();
+    private DateTime _nextPpmReading;
+
     /// <summary>
-    /// Called about once a second. With auto-correction on, once a solid stereo station has been measured, applies the
-    /// dongle's frequency error if it's 1.5 ppm or more (up to 3 rounds per session, since the steps aren't exact).
+    /// Called about once a second. With auto-correction on, takes a reading of the dongle's frequency error every 3 s
+    /// while a solid stereo station plays, and after 9 readings applies their median if it's 1.5 ppm or more and the
+    /// readings agree (interquartile range under 2.5 ppm), at most 10 ppm at a time, up to 3 rounds per session.
+    /// A single reading can be off by several ppm (seen through rtl_tcp: +-4 ppm between readings), and trusting single
+    /// readings walked the setting to +22 ppm over many restarts; when the readings disagree, it leaves the setting alone.
     /// </summary>
     public void PpmTick()
     {
         var eng = Engine;
         if (eng == null || !Settings.AutoPpm || _ppmDone || Seeking) return;
         if (eng.MeasuredPpmError is not double err) return;
-        if (Math.Abs(err) < 1.5 || _ppmRounds >= 3) { _ppmDone = true; return; }
+        if (DateTime.UtcNow < _nextPpmReading) return;
+        _nextPpmReading = DateTime.UtcNow.AddSeconds(3);
+        _ppmReadings.Add(err);
+        if (_ppmReadings.Count < 9) return;
+
+        _ppmReadings.Sort();
+        double median = _ppmReadings[4], spread = _ppmReadings[6] - _ppmReadings[2];
+        string readings = string.Join(" ", _ppmReadings.Select(r => r.ToString("+0.0;-0.0")));
+        _ppmReadings.Clear();
         _ppmRounds++;
-        SetPpm(eng.Ppm + (int)Math.Round(err));
+        if (_ppmRounds >= 3) _ppmDone = true;
+        if (spread > 2.5)
+        {
+            AppLog.Write($"PPM: readings disagree (spread {spread:0.0} ppm: {readings}); leaving {eng.Ppm:+0;-0;0} ppm");
+            return;
+        }
+        if (Math.Abs(median) < 1.5)
+        {
+            AppLog.Write($"PPM: {eng.Ppm:+0;-0;0} ppm is right (median error {median:+0.0;-0.0}: {readings})");
+            _ppmDone = true;
+            return;
+        }
+        int step = Math.Clamp((int)Math.Round(median), -10, 10);
+        AppLog.Write($"PPM: median error {median:+0.0;-0.0} ppm ({readings}): {eng.Ppm:+0;-0;0} -> {eng.Ppm + step:+0;-0;0}");
+        SetPpm(eng.Ppm + step);
         Message?.Invoke($"PPM {Settings.Ppm:+0;-0;0} CALIBRATED");
     }
 
@@ -350,6 +378,7 @@ public sealed class RadioController : IDisposable
         Settings.AutoPpm = true;
         _ppmDone = false;
         _ppmRounds = 0;
+        _ppmReadings.Clear();
         Engine?.Receiver.RestartCarrierOffset();
         Message?.Invoke("CALIBRATING PPM");
     }

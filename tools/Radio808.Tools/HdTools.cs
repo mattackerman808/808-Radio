@@ -143,9 +143,12 @@ internal static class HdTools
     /// <summary>Checks the carrier-offset PPM measurement: deliberately mis-set corrections should read back.</summary>
     public static int PpmTest(double mhz)
     {
-        using var radio = RadioEngine.StartAsync((long)Math.Round(mhz * 1e6), null, 16.6).GetAwaiter().GetResult();
+        var net = Environment.GetEnvironmentVariable("R808_RTLTCP");   // a network dongle, as for play
+        using var radio = (net is { Length: > 0 }
+            ? RadioEngine.StartAsync(new Radio808.Core.Devices.RtlTcpSource(net), (long)Math.Round(mhz * 1e6), 16.6)
+            : RadioEngine.StartAsync((long)Math.Round(mhz * 1e6), null, 16.6)).GetAwaiter().GetResult();
         radio.Muted = true;
-        foreach (int ppm in new[] { 0, 20, -20, 0 })
+        foreach (int ppm in new[] { 0, 20, -20, 0, 0 })
         {
             radio.Ppm = ppm;
             Thread.Sleep(7000);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Radio808.Core.Native;
@@ -12,6 +13,10 @@ public sealed class HdStatus
 {
     public bool Synced;
     public float MerLower, MerUpper, Ber;
+    /// <summary>The median bit error rate of the last few frames (nrsc5 reports one per ~1.5 s frame), or -1 until there are 3.</summary>
+    public float BerAvg = -1;
+    /// <summary>When HD last synced (UTC).</summary>
+    public DateTime SyncedAt = DateTime.MinValue;
     public string? StationName, Slogan, Message, Alert;
     public string? Title, Artist, Album;
     public byte[]? AlbumArt, StationLogo, WeatherMap;
@@ -57,6 +62,8 @@ public sealed unsafe class HdDecoder : IDisposable
     private volatile bool _running;
     private IntPtr _nrsc5;
     private HdStatus _status = new();
+    private readonly Queue<float> _berHist = new();   // the last few frames' bit error rates, for a steady reading
+    private int _berSkip;
     private volatile uint _program;
     private volatile int _generation;      // bumped on retune; blocks from older generations are discarded
     private int _sessionGeneration = -1;
@@ -228,7 +235,8 @@ public sealed unsafe class HdDecoder : IDisposable
             switch (Nrsc5Native.EventType(e))
             {
                 case Nrsc5Native.EventSync:
-                    Update(s => s.Synced = true);
+                    lock (_berHist) { _berHist.Clear(); _berSkip = 1; }   // the first frame after sync is often rough
+                    Update(s => { s.Synced = true; s.SyncedAt = DateTime.UtcNow; s.BerAvg = -1; });
                     break;
                 case Nrsc5Native.EventLostSync:
                     Update(s => s.Synced = false);
@@ -240,7 +248,18 @@ public sealed unsafe class HdDecoder : IDisposable
                     break;
                 case Nrsc5Native.EventBer:
                     float ber = Nrsc5Native.F32(e, 8);
-                    Update(s => s.Ber = ber);
+                    float med = -1;
+                    lock (_berHist)
+                    {
+                        if (_berSkip > 0) _berSkip--;
+                        else
+                        {
+                            _berHist.Enqueue(ber);
+                            while (_berHist.Count > 6) _berHist.Dequeue();
+                            if (_berHist.Count >= 3) { var sorted = _berHist.OrderBy(b => b).ToArray(); med = sorted[sorted.Length / 2]; }
+                        }
+                    }
+                    Update(s => { s.Ber = ber; s.BerAvg = med; });
                     break;
                 case Nrsc5Native.EventAudio:
                     OnAudio(e);
