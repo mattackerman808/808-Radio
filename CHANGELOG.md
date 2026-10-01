@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Instrument panel: the network dongle's host and data rate share one **Source** line, so the statistics no
+  longer run into the equalizer section; shorter Tuning and Gain lines (they were cut off).
+
 ## 0.2.0 (2026-10-01)
 
 - **Network dongle**: use an RTL-SDR on another machine (e.g. a Raspberry Pi by the antenna) through the standard

@@ -92,7 +92,10 @@ public sealed class RtlTcpSource : IIqSource
                 _rateMbps = (b - _rateBytes) * 8 / sec / 1e6;
                 _rateBytes = b; _rateStart = now;
             }
-            return $"{_rateMbps:0.0} Mbit/s  queue {_queue.Count * 22} ms  {DroppedChunks} drops";
+            // short: it shares a line with the host. The queue only matters when it's building up.
+            int queueMs = _queue.Count * 22;
+            return $"{(Port == DefaultPort ? Host : $"{Host}:{Port}")}  {_rateMbps:0.0} Mb/s" +
+                (DroppedChunks > 0 ? $"  {DroppedChunks} drops" : "") + (queueMs > 100 ? $"  q {queueMs} ms" : "");
         }
     }
 

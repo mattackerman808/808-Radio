@@ -37,7 +37,7 @@ back.
 For a server that isn't advertised (another network, a different setup), choose **Network dongle (rtl_tcp)…** and
 enter its name or address (e.g. `raspberrypi.local` or `192.168.1.50`; add `:port` if it isn't 1234).
 
-The instrument panel's **Link** line shows the data rate, the receive queue and any dropped blocks.
+The instrument panel's **Source** line shows the Pi and the data rate (about 24 Mb/s), plus any dropped blocks.
 
 ## Notes
 

@@ -494,14 +494,15 @@ internal sealed class NerdPanel : IDisposable
         {
             var rx = eng.Receiver; var st = rx.Stereo; var rds = rx.Rds; var hd = eng.Hd; var b = eng.Blender; var p = eng.Player;
             H("RF");
-            L("Device", eng.Device.Name);
-            if (eng.Device.LinkStatus is string link) L("Link", link);
+            // (the value column fits about 30 characters, and every line here is spoken for)
+            if (eng.Device.LinkStatus is string link) L("Source", link);   // network dongle: host and data rate
+            else L("Device", eng.Device.Name);
             var perr = eng.MeasuredPpmError;
-            L("Tuning", $"{eng.Frequency / 1e6:0.000} MHz  corr {eng.Ppm:+0;-0;0} ppm" +
-                (perr is double pe ? $"  err {pe:+0.0;-0.0} ppm" : "") + (eng.BiasTee ? "  BIAS-T" : ""));
+            L("Tuning", $"{eng.Frequency / 1e6:0.000} MHz  {eng.Ppm:+0;-0;0} ppm" +
+                (perr is double pe ? $" err {pe:+0.0;-0.0}" : "") + (eng.BiasTee ? "  BIAS-T" : ""));
             var opt = eng.GainOptimizer;
             L("Gain", $"{eng.CurrentGainDb:0.0} dB  " + (eng.AutoGain
-                ? $"auto · {opt.State.ToString().ToLowerInvariant()}{(opt.Metric != "" ? " on " + opt.Metric : "")}"
+                ? $"{opt.State.ToString().ToLowerInvariant()}{(opt.Metric != "" ? " · " + opt.Metric : "")}"
                 : "fixed"));
             L("ADC", opt.Overload ? $"⚠ OVERLOAD  {opt.Clipping * 100:0.00}% clipped" : $"clipping {opt.Clipping * 100:0.000}%  ok");
             L("Signal", $"{rx.ChannelPowerDb:0.0} dBFS  ripple {rx.Equalizer.Ripple:0.000}{(rx.Equalizer.Enabled ? "" : "  EQ off")}");
