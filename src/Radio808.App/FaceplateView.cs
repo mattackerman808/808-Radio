@@ -338,11 +338,14 @@ internal sealed class FaceplateView : Control
         DotMatrix.Draw(g, l2, 0, 292, 140, 3.1f, 9, lit, ghost, glow: false);
         float x = 470;
         x = Indicator(g, x, 138, "HD", synced, playingHd, lit);
-        x = Indicator(g, x, 138, "DGTL", playingHd, false, lit);
-        x = Indicator(g, x, 138, "ST", eng != null && (playingHd || eng.Receiver.Stereo.PilotLocked && eng.Receiver.Stereo.Blend > 0.5f), false, lit);
-        x = Indicator(g, x, 138, "RDS", rds?.Synced == true, false, lit);
+        // status lights are filled when on (HD alone also has an outlined "detected, not playing yet" state)
+        x = Indicator(g, x, 138, "DGTL", playingHd, playingHd, lit);
+        bool stereo = eng != null && (playingHd || eng.Receiver.Stereo.PilotLocked && eng.Receiver.Stereo.Blend > 0.5f);
+        x = Indicator(g, x, 138, "ST", stereo, stereo, lit);
+        bool rdsOn = rds?.Synced == true;
+        x = Indicator(g, x, 138, "RDS", rdsOn, rdsOn, lit);
         int preset = _c.Settings.Presets.FindIndex(p => p != null && Math.Abs(p.Mhz * 1e6 - freq) < 50_000);
-        if (preset >= 0) x = Indicator(g, x, 138, $"P{preset + 1}", true, false, lit);
+        if (preset >= 0) x = Indicator(g, x, 138, $"P{preset + 1}", true, true, lit);
         // signal bars
         int bars = eng == null ? 0 : Math.Clamp((int)Math.Round((eng.Receiver.ChannelPowerDb + 52) / 8), 0, 5);
         for (int i = 0; i < 5; i++)
