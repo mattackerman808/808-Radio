@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **A tuning knob** on the right of the faceplate, under the signal meter, mirroring the volume knob like the classic
+  two-knob head units: turn it (drag around it) to step a channel per notch, the frequency flashing on the display;
+  the wheel over it tunes too, and a click seeks.
+
 ## 0.4.0 (2026-10-01)
 
 - **Display reworked like a real head unit's:** a large dot-matrix line and a full-width small one with the clock;

@@ -42,7 +42,7 @@ anywhere, though the tuning grid, de-emphasis and program types are US defaults 
 | | |
 |---|---|
 | **Volume** | drag or scroll the knob; click it to mute (or ↑/↓, M) |
-| **Tune** | scroll over the display, or ←/→ (one channel, 200 kHz) |
+| **Tune** | turn the **TUNE** knob (right of the display; one channel per notch, click it to seek), scroll over the display, or ←/→ |
 | **Seek** | the ⏮ ⏭ keys, Ctrl+←/→, or media keys |
 | **Presets 1–6** | click to tune, hold (or right-click, or Ctrl+1–6) to save |
 | **SRC** | HD (automatic blend) or analog FM only (A) |

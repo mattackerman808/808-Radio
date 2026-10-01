@@ -18,7 +18,8 @@ It needs about 24 Mbit/s: wired Ethernet, or good 5 GHz Wi-Fi.
 
 USING IT
 - Drag the faceplate to move it; drag its edges to resize.
-- Volume: drag or scroll the knob (click it to mute). Tune: scroll over the display, or the arrow keys.
+- Volume: drag or scroll the knob (click it to mute). Tune: turn the TUNE knob on the right (click it to seek),
+  scroll over the display, or the arrow keys.
 - Seek: the |<< >>| keys (or Ctrl+arrows). Presets 1-6: click to tune, hold to save.
 - SRC switches HD / analog FM. HD CH cycles HD programs (HD1, HD2 ...). DISP steps through what the
   display lines show (song, station, genre, artist, title, frequency).

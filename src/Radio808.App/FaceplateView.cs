@@ -1101,9 +1101,61 @@ internal sealed class FaceplateView : Control
                 g.DrawArc(pen, ax - r, top + 3 - r, 2 * r, 2 * r, -30, 60);
             }
         }
-        // jack
-        using (var b = new SolidBrush(Color.FromArgb(0x04, 0x04, 0x05))) g.FillEllipse(b, 934, 200, 22, 22);
-        using (var pen = new Pen(Color.FromArgb(0x50, 0x56, 0x5F), 2)) g.DrawEllipse(pen, 934, 200, 22, 22);
+        DrawTuneKnob(g, lit);
+    }
+
+    // the tuning knob, under the signal meter: mirrors the volume knob on the left, like the classic two-knob head units
+    private const float TuneCx = 945, TuneCy = 233, TuneR = 21, DetentDeg = 15;   // one channel per 15 degrees
+
+    private void DrawTuneKnob(Graphics g, Color lit)
+    {
+        // the knob turns with the frequency: one detent per 200 kHz channel
+        long ch = (_c.Frequency - Radio808.Core.Radio.RadioEngine.FirstChannel) / Radio808.Core.Radio.RadioEngine.ChannelStep;
+        double turn = (ch * DetentDeg + _tuneDragDeg) * Math.PI / 180;
+        var kr = new RectangleF(TuneCx - TuneR, TuneCy - TuneR, 2 * TuneR, 2 * TuneR);
+        bool hot = _hover == "tuneknob" || _tuneDrag;
+        using (var b = new LinearGradientBrush(kr, Color.FromArgb(0x3A, 0x3F, 0x47), Color.FromArgb(0x0B, 0x0C, 0x0E), 70f)) g.FillEllipse(b, kr);
+        // knurled edge: notches around the rim, turning with the knob
+        using (var notch = new Pen(Color.FromArgb(0x10, 0x12, 0x15), 1.6f))
+            for (int i = 0; i < 24; i++)
+            {
+                double a = turn + i * Math.PI / 12;
+                float c = (float)Math.Cos(a), s = (float)Math.Sin(a);
+                g.DrawLine(notch, TuneCx + c * (TuneR - 4), TuneCy + s * (TuneR - 4), TuneCx + c * (TuneR - 0.5f), TuneCy + s * (TuneR - 0.5f));
+            }
+        using (var rim = new Pen(hot ? Color.FromArgb(160, lit) : Color.FromArgb(0x5A, 0x61, 0x6B), hot ? 1.8f : 1.5f)) g.DrawEllipse(rim, kr);
+        var cap = RectangleF.Inflate(kr, -6, -6);
+        using (var b = new LinearGradientBrush(cap, Color.FromArgb(0x23, 0x27, 0x2D), Color.FromArgb(0x14, 0x16, 0x1A), 250f)) g.FillEllipse(b, cap);
+        float px = TuneCx + (float)Math.Cos(turn - Math.PI / 2) * (TuneR - 10), py = TuneCy + (float)Math.Sin(turn - Math.PI / 2) * (TuneR - 10);
+        using (var dot = new SolidBrush(lit)) g.FillEllipse(dot, px - 2.5f, py - 2.5f, 5, 5);
+        Label(g, "TUNE", 8.5f, lit, new RectangleF(TuneCx - 20, TuneCy + TuneR + 2, 40, 11), StringAlignment.Center, bold: true);
+        _hits.Add(new Hit(RectangleF.Inflate(kr, 6, 6), "tuneknob", () => _c.Seek(1)));   // a click (no turn) seeks up
+    }
+
+    private bool _tuneDrag, _tuneMoved;
+    private double _tuneStartDeg, _tuneDragDeg;   // where the drag started; how far it's turned past the last detent
+    private int _tuneApplied;                     // channels stepped so far in this drag
+
+    private static double AngleDeg(PointF p) => Math.Atan2(p.Y - TuneCy, p.X - TuneCx) * 180 / Math.PI;
+
+    /// <summary>Turning the tuning knob: steps a channel per detent, flashing the frequency.</summary>
+    private void TuneDragTo(PointF p)
+    {
+        if (Math.Abs(p.X - TuneCx) + Math.Abs(p.Y - TuneCy) < 7) return;   // too close to the center to read an angle
+        double d = AngleDeg(p) - _tuneStartDeg;
+        d = (d + 540) % 360 - 180;   // the short way round
+        _tuneStartDeg = AngleDeg(p);
+        _tuneDragDeg += d;
+        if (Math.Abs(_tuneDragDeg) > 4) _tuneMoved = true;
+        while (Math.Abs(_tuneDragDeg) >= DetentDeg)
+        {
+            int dir = Math.Sign(_tuneDragDeg);
+            _tuneDragDeg -= dir * DetentDeg;
+            _c.Step(dir);
+            _tuneApplied += dir;
+        }
+        if (_tuneMoved) Flash($"FM {_c.Frequency / 1e6:0.0}", 0.9);
+        Invalidate();
     }
 
     // ------------------------------------------------------------------ widgets
@@ -1199,6 +1251,7 @@ internal sealed class FaceplateView : Control
     protected override void OnMouseMove(MouseEventArgs e)
     {
         var p = ToDesign(e.Location);
+        if (_tuneDrag) { TuneDragTo(p); return; }
         if (_knobDrag)
         {
             float dy = _knobStart.Y - p.Y;
@@ -1243,6 +1296,7 @@ internal sealed class FaceplateView : Control
         _pressed = h.Id;
         _holdFired = false;
         if (h.Id == "knob") { _knobDrag = true; _knobMoved = false; _knobStart = p; _knobStartVol = _c.Settings.Volume; }
+        else if (h.Id == "tuneknob") { _tuneDrag = true; _tuneMoved = false; _tuneStartDeg = AngleDeg(p); _tuneDragDeg = 0; _tuneApplied = 0; }
         else if (h.Hold != null) { _holdAction = h.Hold; _hold.Start(); }
         Invalidate();
     }
@@ -1255,6 +1309,12 @@ internal sealed class FaceplateView : Control
         {
             _knobDrag = false;
             if (!_knobMoved) { _c.ToggleMute(); Flash(_c.Settings.Muted ? "MUTE" : "MUTE OFF", 1.0); }
+        }
+        else if (_tuneDrag)
+        {
+            _tuneDrag = false;
+            _tuneDragDeg = 0;   // settle into the detent
+            if (!_tuneMoved && HitAt(p)?.Id == "tuneknob") _c.Seek(1);   // a click without turning seeks up
         }
         else if (e.Button == MouseButtons.Left && !_holdFired)
         {
