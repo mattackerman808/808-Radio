@@ -619,8 +619,8 @@ internal sealed class FaceplateView : Control
         using (var dot = new SolidBrush(muted ? Grey : lit)) g.FillEllipse(dot, px - 3.5f, py - 3.5f, 7, 7);
         _hits.Add(new Hit(new RectangleF(cx - r - 12, cy - r - 12, 2 * r + 24, 2 * r + 24), "knob", null));
 
-        // BAND / DISP
-        Label(g, "BAND", 10, lit, new RectangleF(142, 196, 52, 14), StringAlignment.Center, bold: true);
+        // HD CH (next HD program) / DISP
+        Label(g, "HD CH", 10, lit, new RectangleF(142, 196, 52, 14), StringAlignment.Center, bold: true);   // next HD program
         Label(g, "DISP", 10, lit, new RectangleF(200, 196, 52, 14), StringAlignment.Center, bold: true);
         Key(g, new RectangleF(142, 212, 52, 22), "band", NextProgram);
         Key(g, new RectangleF(200, 212, 52, 22), "disp", () =>
@@ -680,6 +680,30 @@ internal sealed class FaceplateView : Control
         string left = $"{band,-4}{mhz,5}", clockText = DateTime.Now.ToString("H:mm").PadLeft(5);
         var l2 = DotMatrix.Columns(left + new string(' ', Line2Cells - left.Length - clockText.Length) + clockText);
         DotMatrix.Draw(g, l2, 0, 292, 136, 3.1f, Line2Cells, lit, ghost, glow: false);   // ends ~776, left of the art square
+        // the station's HD programs in the middle ("HD 1 2 3"): the one you're hearing fully lit, the rest dimmer (all
+        // dimmer when HD isn't playing); click a number to switch
+        if (hd != null && synced && hd.Programs.Count > 0 && eng != null)
+        {
+            const float pitch = 3.1f, cellW = pitch * DotMatrix.CellCols;
+            var dim = Color.FromArgb(110, lit);
+            var progs = hd.Programs.Keys.ToList();
+            int cell = 11;
+            void Cell(string ch, Color c) => DotMatrix.Draw(g, DotMatrix.Columns(ch), 0, 292 + cell * cellW, 136, pitch, 1, c, ghost, glow: false);
+            Cell("H", playingHd ? lit : dim); cell++;
+            Cell("D", playingHd ? lit : dim); cell += 2;
+            bool spaced = progs.Count <= 4;
+            foreach (uint p in progs)
+            {
+                uint prog = p;
+                Cell(((p + 1) % 10).ToString(), playingHd && p == eng.Program ? lit : dim);
+                _hits.Add(new Hit(new RectangleF(292 + cell * cellW - 2, 132, cellW + 2, 30), "prog" + p, () =>
+                {
+                    _c.SetProgram(prog);
+                    Flash($"HD{prog + 1}/{progs.Count}");
+                }));
+                cell += spaced ? 2 : 1;
+            }
+        }
 
         // line 3: the status lights, fixed legends printed on the glass like a real head unit's display: each is either
         // lit or dark, and nothing moves. HD WEAK · stereo RDS · SEEK · WX TRAFFIC, signal bars at the right end.

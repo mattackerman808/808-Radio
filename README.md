@@ -46,7 +46,7 @@ anywhere, though the tuning grid, de-emphasis and program types are US defaults 
 | **Seek** | the ⏮ ⏭ keys, Ctrl+←/→, or media keys |
 | **Presets 1–6** | click to tune, hold (or right-click, or Ctrl+1–6) to save |
 | **SRC** | HD (automatic blend) or analog FM only (A) |
-| **BAND** | next HD program: HD1, HD2 … (H) |
+| **HD CH** | next HD program: HD1, HD2 … (H); or click a number in the display's `HD 1 2 3` |
 | **DISP** | now playing / station name / frequency (D) |
 | **Bulb key** | illumination color (C): cyan, amber, green, red, blue, white |
 | **▲** | flip the faceplate down to the instrument panel (O) |
@@ -54,7 +54,7 @@ anywhere, though the tuning grid, de-emphasis and program types are US defaults 
 
 Drag the faceplate to move it; drag its edges to resize. The display has a large dot-matrix line (now playing, station
 name or frequency), a small one with the band and frequency (`FM 97.3`, or the HD program you're hearing, `HD2 97.3`:
-choose with **BAND**) and the clock, and a row of fixed status lights: **HD** (outlined: found; filled: you're hearing
+choose with **HD CH**; the station's HD programs are listed after it, `HD 1 2 3`) and the clock, and a row of fixed status lights: **HD** (outlined: found; filled: you're hearing
 the digital audio), **WEAK** in red (HD found, with its station name and programs, but the signal is too poor to play
 its audio, so you hear the analog), the stereo rings, **RDS**, **SEEK**, **WX** / **TRAFFIC** (weather / traffic map
 available: click it). The preset you're on is outlined in the row of preset keys. The slot on the right of the
