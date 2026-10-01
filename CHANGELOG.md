@@ -4,12 +4,13 @@
 
 - Instrument panel: the network dongle's host and data rate share one **Source** line, so the statistics no
   longer run into the equalizer section; shorter Tuning and Gain lines (they were cut off).
-- Instrument panel runs at 60 fps (was 10), or 30 or 120 (right-click → Panel frame rate). Frames are paced off the
-  display's refresh (DwmFlush) rather than a 15.6 ms timer, so they're evenly spaced; the spectrum, waterfall,
-  multiplex and meters update every frame, and the waterfall glides between rows instead of jumping. Painting a frame
-  costs a quarter of what it did: WinForms was allocating a new full-window back buffer on every paint (its default
-  MaximumBuffer is 225 x 96), the chassis is cached, and only the sections that change are redrawn. At 2600 x 1482 px:
-  21 → 6 ms per frame; 120 fps uses ~70% of the UI thread, 60 fps ~40%.
+- **Instrument panel on the GPU.** The spectrum, waterfall, multiplex and meters are drawn with Direct2D in their own
+  window, on a render thread, presented in step with the display (flip-model swap chain): every refresh by default
+  (right-click → Panel frame rate: display / 120 / 60 / 30), about 1.3 ms of CPU a frame, and the UI thread stays
+  free (it was 40–70% busy drawing). The waterfall glides between rows, and the traces respond faster. GDI+ still
+  draws the rest, the flip animation, and everything if Direct3D isn't available (then at up to 60 fps, paced off
+  the display). Also fixed for all painting: WinForms allocated a new full-window back buffer on every paint (its
+  default MaximumBuffer is 225 x 96), ~4 ms a frame at 4K.
 - `808Radio.exe --bench <recordings> <seconds> <report> [width] [fps]`: paint timings with the panel open.
 
 ## 0.2.0 (2026-10-01)

@@ -135,6 +135,7 @@ settings untouched, beside a normal copy) and writes paint timings per section.
 - [nrsc5](https://github.com/theori-io/nrsc5), with FAAD2 and FFTW: HD Radio decoding
 - [librtlsdr](https://gitea.osmocom.org/sdr/rtl-sdr) (osmocom) and [libusb](https://libusb.info/): dongle access
 - [NAudio](https://github.com/naudio/NAudio): WASAPI output
+- [Vortice.Windows](https://github.com/amerkoleci/Vortice.Windows): Direct2D on the GPU for the instrument panel
 - Sister project: [808 HD](https://github.com/mattackerman808/808-HD), an HD Radio plugin for SDR#
 
 ## License

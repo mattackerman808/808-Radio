@@ -2,9 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
 using System.Linq;
-using System.Runtime.InteropServices;
 using Radio808.Core.Dsp;
 using Radio808.Core.Radio;
 
@@ -13,16 +11,23 @@ namespace Radio808.App;
 /// <summary>
 /// The "behind the faceplate" instrument panel: baseband spectrum + waterfall, FM MPX spectrum, live stats,
 /// history sparklines, the multipath equalizer's taps, and audio meters. Drawn in design coordinates.
+///
+/// The live sections (spectrum + waterfall, multiplex, meters) draw through <see cref="IPanelCanvas"/>: on the GPU from
+/// the <see cref="GpuPanel"/>'s render thread while the panel is open, or with GDI+ (during the flip, or if there's no
+/// GPU). Their state is guarded by <see cref="Sync"/>. The slow sections (stats, taps, history) are GDI+ on the UI thread.
 /// </summary>
 internal sealed class NerdPanel : IDisposable
 {
     private const int SpecW = 592, WaterH = 150;
 
+    /// <summary>Guards the live sections' state (render thread vs. UI thread).</summary>
+    public readonly object Sync = new();
+
     private readonly RadioController _c;
     private readonly float[] _spec = new float[SpecW];
     private bool _specValid;
-    private readonly Bitmap _water = new(SpecW, WaterH, PixelFormat.Format32bppRgb);
-    private int _waterRow;   // next row to write (circular)
+    private readonly WaterfallImage _water = new(SpecW, WaterH);
+    private int _newest;   // waterfall row holding the newest line; older lines follow below it (circular)
     private float _wfFloor = -60, _wfTop = -20;
 
     private readonly Fft _mpxFft = new(4096);
@@ -40,12 +45,15 @@ internal sealed class NerdPanel : IDisposable
 
     public NerdPanel(RadioController c) => _c = c;
 
+    /// <summary>True while the GPU draws the live sections: GDI+ paints skip them.</summary>
+    public bool LiveOnGpu { get; set; }
+
     // ------------------------------------------------------------------ data in
 
     /// <summary>A new baseband power spectrum (4096 bins, dB, -fs/2 .. +fs/2), used in the 744 kHz span.</summary>
     public void AddBaseband(float[] db)
     {
-        if (!Wide) AddRow(db);
+        lock (Sync) if (!Wide) AddRow(db);
     }
 
     private const double RowSeconds = 0.05;   // waterfall: 20 rows a second
@@ -60,25 +68,26 @@ internal sealed class NerdPanel : IDisposable
         lastAt = now;
         return (float)(1 - Math.Exp(-dt / tau));
     }
-    private readonly float[] _rowAcc = new float[SpecW];
-    private int _rowCount;
-    private DateTime _nextRow = DateTime.MinValue;
 
-    private readonly Fft _devFft = new(4096);
-    private readonly float[] _devIq = new float[8192], _devDb = new float[4096];
+    private readonly float[] _rowAcc = new float[SpecW], _row = new float[SpecW], _sorted = new float[SpecW];
+    private int _rowCount;
+    private double _nextRowAt;
+
+    private readonly Fft _devFft = new(4096), _bbFft = new(4096);
+    private readonly float[] _devIq = new float[8192], _devDb = new float[4096], _bbIq = new float[8192], _bbDb = new float[4096];
     private long _rowCenter;
 
     private void AddRow(float[] db)
     {
         CheckRetune();
         if (DateTime.UtcNow < _ignoreRowsUntil) return;   // samples still in flight from the old frequency
-        // each column covers its exact share of the bins (4096 / 592 isn't an integer; truncating it squeezed the
-        // spectrum toward the left and put the signal ~100 kHz off its markers)
-        // The trace follows every spectrum (one per frame); the waterfall gets a row every RowSeconds, the average of the
-        // spectra since the last one (smoother than single spectra, and ~7 s of history in the 150 rows). The trace's
-        // smoothing is by time (~150 ms), so it looks the same at any frame rate.
-        float specAlpha = Alpha(ref _specAt, 0.15);
-        var row = new float[SpecW];
+        // Each column covers its exact share of the bins (4096 / 592 isn't an integer; truncating it squeezed the
+        // spectrum toward the left and put the signal ~100 kHz off its markers).
+        // The trace follows every spectrum (one per frame), lightly smoothed by time (~60 ms, so it looks the same at
+        // any frame rate and doesn't lag); the waterfall gets a row every RowSeconds, the average of the spectra since
+        // the last one (smoother than single spectra, and ~7 s of history in the 150 rows).
+        float specAlpha = Alpha(ref _specAt, 0.06);
+        var row = _row;
         for (int c = 0; c < SpecW; c++)
         {
             int k0 = (int)((long)c * db.Length / SpecW), k1 = Math.Max(k0 + 1, (int)((long)(c + 1) * db.Length / SpecW));
@@ -91,9 +100,9 @@ internal sealed class NerdPanel : IDisposable
         }
         _specValid = true;
         _rowCount++;
-        var now = DateTime.UtcNow;
-        if (now < _nextRow) return;
-        _nextRow = (now - _nextRow).TotalSeconds > RowSeconds ? now.AddSeconds(RowSeconds) : _nextRow.AddSeconds(RowSeconds);
+        double now = Clock.Elapsed.TotalSeconds;
+        if (now < _nextRowAt) return;
+        _nextRowAt = now - _nextRowAt > RowSeconds ? now + RowSeconds : _nextRowAt + RowSeconds;
         for (int c = 0; c < SpecW; c++)
         {
             row[c] = 10 * MathF.Log10(_rowAcc[c] / _rowCount + 1e-20f);
@@ -101,36 +110,36 @@ internal sealed class NerdPanel : IDisposable
         }
         _rowCount = 0;
         // waterfall scale tracks the noise floor and the peak slowly
-        var sorted = (float[])row.Clone();
-        Array.Sort(sorted);
-        float floor = sorted[SpecW / 5] - 3, top = Math.Max(sorted[^1], floor + 25);
+        Array.Copy(row, _sorted, SpecW);
+        Array.Sort(_sorted);
+        float floor = _sorted[SpecW / 5] - 3, top = Math.Max(_sorted[^1], floor + 25);
         float rate = _wfScaled ? 0.1f : 1f;   // after a clear, snap the color scale to the first row
         _wfFloor += rate * (floor - _wfFloor);
         _wfTop += rate * (top - _wfTop);
         _wfScaled = true;
         WriteWaterfallRow(row);
-        _lastRowAt = Clock.Elapsed.TotalSeconds;
+        _lastRowAt = now;
     }
 
     private void WriteWaterfallRow(float[] row)
     {
-        var data = _water.LockBits(new Rectangle(0, _waterRow, SpecW, 1), ImageLockMode.WriteOnly, PixelFormat.Format32bppRgb);
-        var px = new int[SpecW];
+        _newest = (_newest - 1 + WaterH) % WaterH;
+        var px = _water.Pixels.AsSpan(_newest * SpecW, SpecW);
         for (int c = 0; c < SpecW; c++) px[c] = Heat((row[c] - _wfFloor) / (_wfTop - _wfFloor));
-        Marshal.Copy(px, 0, data.Scan0, SpecW);
-        _water.UnlockBits(data);
-        _waterRow = (_waterRow + 1) % WaterH;
+        _water.Version++;
     }
+
+    private static readonly (float p, int r, int g, int b)[] HeatStops =
+        { (0, 0, 0, 0), (0.2f, 0, 0, 110), (0.45f, 0, 170, 230), (0.65f, 240, 230, 40), (0.85f, 255, 60, 20), (1, 255, 255, 255) };
 
     /// <summary>Classic SDR waterfall palette: black, blue, cyan, yellow, red, white.</summary>
     private static int Heat(float v)
     {
         v = Math.Clamp(v, 0, 1);
-        (float p, int r, int g, int b)[] stops = { (0, 0, 0, 0), (0.2f, 0, 0, 110), (0.45f, 0, 170, 230), (0.65f, 240, 230, 40), (0.85f, 255, 60, 20), (1, 255, 255, 255) };
-        for (int i = 1; i < stops.Length; i++)
-            if (v <= stops[i].p)
+        for (int i = 1; i < HeatStops.Length; i++)
+            if (v <= HeatStops[i].p)
             {
-                var a = stops[i - 1]; var b = stops[i];
+                var a = HeatStops[i - 1]; var b = HeatStops[i];
                 float t = (v - a.p) / (b.p - a.p);
                 int r = (int)(a.r + (b.r - a.r) * t), g = (int)(a.g + (b.g - a.g) * t), bl = (int)(a.b + (b.b - a.b) * t);
                 return (r << 16) | (g << 8) | bl;
@@ -138,29 +147,40 @@ internal sealed class NerdPanel : IDisposable
         return 0xFFFFFF;
     }
 
-    /// <summary>Pulls the wide spectrum and the MPX spectrum (call every frame, ~30 Hz).</summary>
+    /// <summary>Pulls the spectrum (wide or narrow) and the MPX spectrum. Call once per frame.</summary>
     public void FrameTick(RadioEngine? eng)
     {
         if (eng == null) return;
-        if (Wide && eng.TryGetDeviceSpectrumBlock(_devIq))
+        lock (Sync)
         {
-            _devFft.PowerDb(_devIq, _re, _im, _devDb);
-            AddRow(_devDb);
-        }
-        if (eng.TryGetMpxBlock(_mpxIn))
-        {
-            for (int i = 0; i < 4096; i++) { _mpxIq[2 * i] = _mpxIn[i]; _mpxIq[2 * i + 1] = 0; }
-            _mpxFft.PowerDb(_mpxIq, _re, _im, _mpxDb);   // index 2048 = DC
-            float mpxAlpha = Alpha(ref _mpxAt, 0.24);
-            double binHz = FmReceiver.MpxRate / 4096;
-            for (int c = 0; c < SpecW; c++)
+            if (Wide)
             {
-                double f0 = c * 60_000.0 / SpecW, f1 = (c + 1) * 60_000.0 / SpecW;
-                float m = -200;
-                for (int k = (int)(f0 / binHz); k <= (int)(f1 / binHz); k++) m = Math.Max(m, _mpxDb[2048 + k]);
-                _mpx[c] = _mpxValid ? _mpx[c] + mpxAlpha * (m - _mpx[c]) : m;
+                if (eng.TryGetDeviceSpectrumBlock(_devIq))
+                {
+                    _devFft.PowerDb(_devIq, _re, _im, _devDb);
+                    AddRow(_devDb);
+                }
             }
-            _mpxValid = true;
+            else if (eng.TryGetSpectrumBlock(_bbIq))
+            {
+                _bbFft.PowerDb(_bbIq, _re, _im, _bbDb);
+                AddRow(_bbDb);
+            }
+            if (eng.TryGetMpxBlock(_mpxIn))
+            {
+                for (int i = 0; i < 4096; i++) { _mpxIq[2 * i] = _mpxIn[i]; _mpxIq[2 * i + 1] = 0; }
+                _mpxFft.PowerDb(_mpxIq, _re, _im, _mpxDb);   // index 2048 = DC
+                float mpxAlpha = Alpha(ref _mpxAt, 0.12);
+                double binHz = FmReceiver.MpxRate / 4096;
+                for (int c = 0; c < SpecW; c++)
+                {
+                    double f0 = c * 60_000.0 / SpecW, f1 = (c + 1) * 60_000.0 / SpecW;
+                    float m = -200;
+                    for (int k = (int)(f0 / binHz); k <= (int)(f1 / binHz); k++) m = Math.Max(m, _mpxDb[2048 + k]);
+                    _mpx[c] = _mpxValid ? _mpx[c] + mpxAlpha * (m - _mpx[c]) : m;
+                }
+                _mpxValid = true;
+            }
         }
     }
 
@@ -191,44 +211,92 @@ internal sealed class NerdPanel : IDisposable
 
     public void Reset()
     {
-        _specValid = _mpxValid = false;
+        lock (Sync) _specValid = _mpxValid = false;
         _hist.Clear();
         _lastGroups = -1;
     }
 
-    // ------------------------------------------------------------------ drawing
+    // ------------------------------------------------------------------ layout
 
     /// <summary>Sections redrawn every frame (spectrum + waterfall, multiplex, meters), in design coordinates.</summary>
     public RectangleF[] FastRects { get; private set; } = Array.Empty<RectangleF>();
     /// <summary>Sections whose data changes a few times a second (stats, taps, history).</summary>
     public RectangleF[] SlowRects { get; private set; } = Array.Empty<RectangleF>();
+    /// <summary>The live sections' column (what the GPU panel covers), in design coordinates.</summary>
+    public RectangleF LiveArea { get; private set; }
 
+    private RectangleF _baseband, _mpxR, _meters, _statsR, _tapsR, _histR;
+
+    public void Layout(RectangleF area)
+    {
+        float lx = area.X + 12, rx = area.X + 632, rw = area.Right - rx - 12;
+        _baseband = new(lx - 4, area.Y + 4, SpecW + 8, 292);
+        _mpxR = new(lx - 4, area.Y + 292, SpecW + 8, 132);
+        _meters = new(lx - 4, area.Y + 424, SpecW + 8, 66);
+        _statsR = new(rx - 2, area.Y + 4, rw + 4, 308);
+        _tapsR = new(rx - 2, area.Y + 312, rw + 4, 74);
+        _histR = new(rx - 2, area.Y + 384, rw + 4, area.Bottom - area.Y - 384);
+        FastRects = new[] { _baseband, _mpxR, _meters };
+        SlowRects = new[] { _statsR, _tapsR, _histR };
+        LiveArea = RectangleF.FromLTRB(_baseband.Left, _baseband.Top, _baseband.Right, _meters.Bottom);
+        TuneArea = new RectangleF(lx, area.Y + 26, SpecW, 100 + 1 + WaterH);
+        SpanToggle = new RectangleF(lx + SpecW - 140, area.Y + 6, 140, 16);
+    }
+
+    // ------------------------------------------------------------------ drawing
+
+    /// <summary>GDI+ paint (UI thread): the slow sections, and the live ones unless the GPU has them.</summary>
     public void Draw(Graphics g, RectangleF area, Color lit, PaintTiming timing)
     {
         var eng = _c.Engine;
-        float lx = area.X + 12, rx = area.X + 632, rw = area.Right - rx - 12;
-        RectangleF baseband = new(lx - 4, area.Y + 4, SpecW + 8, 292), mpx = new(lx - 4, area.Y + 292, SpecW + 8, 132),
-            meters = new(lx - 4, area.Y + 424, SpecW + 8, 66), stats = new(rx - 2, area.Y + 4, rw + 4, 308),
-            taps = new(rx - 2, area.Y + 312, rw + 4, 74), hist = new(rx - 2, area.Y + 384, rw + 4, area.Bottom - area.Y - 384);
-        FastRects = new[] { baseband, mpx, meters };
-        SlowRects = new[] { stats, taps, hist };
-        // a frame usually repaints only some sections: skip the others (GDI+ would still do most of their work)
+        Layout(area);
         long t = System.Diagnostics.Stopwatch.GetTimestamp();
-        if (g.IsVisible(baseband)) DrawBaseband(g, lx, area.Y + 8, lit);
-        t = timing.Section("spectrum+wf", t);
-        if (g.IsVisible(mpx)) DrawMpx(g, lx, area.Y + 296, lit);
-        t = timing.Section("mpx", t);
-        if (g.IsVisible(meters)) DrawMeters(g, lx, area.Y + 428, lit, eng);
-        t = timing.Section("meters", t);
-        if (g.IsVisible(stats)) DrawStats(g, rx, area.Y + 8, rw, lit, eng);
+        if (!LiveOnGpu && (g.IsVisible(_baseband) || g.IsVisible(_mpxR) || g.IsVisible(_meters)))
+        {
+            var cv = new GdiCanvas(g);
+            lock (Sync) DrawLive(cv, area, lit, g.IsVisible(_baseband), g.IsVisible(_mpxR), g.IsVisible(_meters));
+        }
+        t = timing.Section("live (gdi)", t);
+        float rx = area.X + 632, rw = area.Right - rx - 12;
+        if (g.IsVisible(_statsR)) DrawStats(g, rx, area.Y + 8, rw, lit, eng);
         t = timing.Section("stats", t);
-        if (g.IsVisible(taps)) DrawTaps(g, rx, area.Y + 316, rw, lit, eng);
+        if (g.IsVisible(_tapsR)) DrawTaps(g, rx, area.Y + 316, rw, lit, eng);
         t = timing.Section("taps", t);
-        if (g.IsVisible(hist)) DrawHistory(g, rx, area.Y + 388, rw, lit);
+        if (g.IsVisible(_histR)) DrawHistory(g, rx, area.Y + 388, rw, lit);
         t = timing.Section("history", t);
     }
 
-    private void DrawBaseband(Graphics g, float x, float y, Color lit)
+    /// <summary>GPU paint (render thread): the live sections.</summary>
+    public void DrawGpu(IPanelCanvas cv, RectangleF area, Color lit)
+    {
+        lock (Sync)
+        {
+            Layout(area);
+            DrawLive(cv, area, lit, true, true, true);
+        }
+    }
+
+    private void DrawLive(IPanelCanvas cv, RectangleF area, Color lit, bool baseband, bool mpx, bool meters)
+    {
+        float lx = area.X + 12;
+        if (baseband) DrawBaseband(cv, lx, area.Y + 8, lit);
+        if (mpx) DrawMpx(cv, lx, area.Y + 296, lit);
+        if (meters) DrawMeters(cv, lx, area.Y + 428, lit, _c.Engine);
+    }
+
+    private static void Title(IPanelCanvas cv, float x, float y, string s, Color lit) =>
+        cv.Text(s, new RectangleF(x, y, 900, 16), TextKind.Title, lit);
+
+    private static void Small(IPanelCanvas cv, string s, float x, float y, float w, Color c, StringAlignment align) =>
+        cv.Text(s, new RectangleF(x, y, w, 14), TextKind.Small, c, align);
+
+    private static void Frame(IPanelCanvas cv, RectangleF r, bool fill = true)
+    {
+        if (fill) cv.Fill(r, Color.FromArgb(0x03, 0x05, 0x06));
+        cv.Stroke(r, Color.FromArgb(0x1E, 0x24, 0x2B));
+    }
+
+    private void DrawBaseband(IPanelCanvas cv, float x, float y, Color lit)
     {
         CheckRetune();
         long f = _c.Frequency;
@@ -236,127 +304,105 @@ internal sealed class NerdPanel : IDisposable
         var eng = _c.Engine;
         bool hdSynced = eng?.Hd.Synced == true, hdPlaying = eng?.Blender.PlayingHd == true;
         var orange = Color.FromArgb(0xF7, 0x94, 0x1D);
-        Title(g, x, y, $"SPECTRUM  \u00B7  {f / 1e6:0.0} MHz  \u00B7  click a station to tune, wheel to step", lit);
+        Title(cv, x, y, $"SPECTRUM  ·  {f / 1e6:0.0} MHz  ·  click a station to tune, wheel to step", lit);
         // span toggle, right-aligned on the title line
         float rEdge = x + SpecW;
-        SpanToggle = new RectangleF(rEdge - 140, y - 2, 140, 16);
         var dim = Color.FromArgb(90, lit);
-        Small(g, "SPAN", rEdge - 140, y + 1, 34, dim, StringAlignment.Near);
-        Small(g, "1.5 MHz", rEdge - 104, y + 1, 44, Wide ? lit : dim, StringAlignment.Near);
-        Small(g, "|", rEdge - 56, y + 1, 8, dim, StringAlignment.Near);
-        Small(g, "744 kHz", rEdge - 44, y + 1, 44, Wide ? dim : lit, StringAlignment.Near);
+        Small(cv, "SPAN", rEdge - 140, y + 1, 34, dim, StringAlignment.Near);
+        Small(cv, "1.5 MHz", rEdge - 104, y + 1, 44, Wide ? lit : dim, StringAlignment.Near);
+        Small(cv, "|", rEdge - 56, y + 1, 8, dim, StringAlignment.Near);
+        Small(cv, "744 kHz", rEdge - 44, y + 1, 44, Wide ? dim : lit, StringAlignment.Near);
 
         var sr = new RectangleF(x, y + 18, SpecW, 100);
         var wr = new RectangleF(x, sr.Bottom + 1, SpecW, WaterH);
-        Frame(g, sr);
-        TuneArea = new RectangleF(x, sr.Y, SpecW, sr.Height + 1 + WaterH);
+        Frame(cv, sr);
         _tuneX0 = x;
 
         // Everything inside the spectrum/waterfall (and the axis under it) is drawn in the new center's
         // coordinates, shifted by the slide offset, which eases to 0 after a retune.
         float pan = Pan;
-        var outer = g.Save();
-        g.SetClip(new RectangleF(x, sr.Y, SpecW, sr.Height + 1 + WaterH + 16));
-        g.TranslateTransform(pan, 0);
+        cv.PushClip(new RectangleF(x, sr.Y, SpecW, sr.Height + 1 + WaterH + 16));
+        cv.PushTranslate(pan, 0);
         float Px(double khz) => (float)(sr.X + (khz + half) / (2 * half) * SpecW);
 
         // the current station's HD sidebands: only while HD is decoding, brighter while it's what you hear
         if (hdSynced)
-            using (var hdB = new SolidBrush(Color.FromArgb(hdPlaying ? 48 : 24, orange)))
-            {
-                g.FillRectangle(hdB, Px(-198), sr.Y, Px(-129) - Px(-198), sr.Height);
-                g.FillRectangle(hdB, Px(129), sr.Y, Px(198) - Px(129), sr.Height);
-            }
+        {
+            var hdC = Color.FromArgb(hdPlaying ? 48 : 24, orange);
+            cv.Fill(RectangleF.FromLTRB(Px(-198), sr.Y, Px(-129), sr.Bottom), hdC);
+            cv.Fill(RectangleF.FromLTRB(Px(129), sr.Y, Px(198), sr.Bottom), hdC);
+        }
         // channel grid (US: odd tenths, 200 kHz apart), one span beyond each edge so the slide never shows a gap
         var channels = new List<(long hz, float px)>();
         long firstCh = Snap(f - (long)(2 * half * 1000));
         for (long ch = firstCh; ch <= f + 2 * half * 1000; ch += RadioEngine.ChannelStep)
             channels.Add((ch, Px((ch - f) / 1000.0)));
-        using (var grid = new Pen(Color.FromArgb(30, lit), 1) { DashStyle = DashStyle.Dot })
-            foreach (var (_, px) in channels) g.DrawLine(grid, px, sr.Y, px, sr.Bottom);
+        var gridC = Color.FromArgb(30, lit);
+        foreach (var (_, px) in channels) cv.Line(px, sr.Y, px, sr.Bottom, gridC, 1, DashStyle.Dot);
         if (_specValid)
         {
             float lo = _wfFloor, hi = _wfTop + 5;
             var pts = new PointF[SpecW];
             for (int c = 0; c < SpecW; c++)
                 pts[c] = new PointF(sr.X + c, sr.Bottom - Math.Clamp((_spec[c] - lo) / (hi - lo), 0, 1) * (sr.Height - 4));
-            var poly = new List<PointF>(pts) { new(sr.Right, sr.Bottom), new(sr.X, sr.Bottom) };
-            // the fill's edge is under the anti-aliased line, so it doesn't need anti-aliasing itself (much cheaper)
-            g.SmoothingMode = SmoothingMode.None;
-            using (var fill = new LinearGradientBrush(sr, Color.FromArgb(110, lit), Color.FromArgb(10, lit), 90f)) g.FillPolygon(fill, poly.ToArray());
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var pen = new Pen(lit, 1.2f)) g.DrawLines(pen, pts);
+            cv.Area(pts, sr.Bottom, sr, Color.FromArgb(110, lit), Color.FromArgb(10, lit));
+            cv.Trace(pts, lit, 1.2f);
         }
-        // waterfall: newest row at the top
-        int newest = (_waterRow - 1 + WaterH) % WaterH;
-        var state = g.Save();
-        g.InterpolationMode = InterpolationMode.NearestNeighbor;
-        g.PixelOffsetMode = PixelOffsetMode.Half;
-        g.SetClip(wr, CombineMode.Intersect);
-        // glide: between rows, the image moves down by the fraction of a row that's due, and the newest row stretches
-        // into the gap above it, so the waterfall scrolls continuously instead of jumping a row at a time
+        // waterfall, newest row at the top. Between rows the image glides down by the fraction of a row that's due,
+        // with the newest row stretched into the gap, so it scrolls continuously instead of jumping a row at a time.
+        cv.PushClip(wr);
         float glide = _specValid ? (float)Math.Clamp((Clock.Elapsed.TotalSeconds - _lastRowAt) / RowSeconds, 0, 1) : 0;
-        int topRows = newest + 1;
-        DrawFlipped(g, new Rectangle(0, 0, SpecW, topRows), wr.X, wr.Y + glide);
-        if (topRows < WaterH) DrawFlipped(g, new Rectangle(0, topRows, SpecW, WaterH - topRows), wr.X, wr.Y + glide + topRows);
-        if (glide > 0)
-            g.DrawImage(_water, new RectangleF(wr.X, wr.Y, SpecW, glide), new RectangleF(0, newest, SpecW, 1), GraphicsUnit.Pixel);
-        g.Restore(state);
+        int first = WaterH - _newest;   // rows from the newest to the bottom of the image, then from its top
+        cv.Waterfall(_water, _newest, first, new RectangleF(wr.X, wr.Y + glide, SpecW, first));
+        cv.Waterfall(_water, 0, _newest, new RectangleF(wr.X, wr.Y + glide + first, SpecW, _newest));
+        if (glide > 0) cv.Waterfall(_water, _newest, 1, new RectangleF(wr.X, wr.Y, SpecW, glide));
+        cv.PopClip();
         // axis: channel frequencies, the tuned one brighter
         foreach (var (hz, px) in channels)
-            Small(g, (hz / 1e6).ToString("0.0"), px - 18, wr.Bottom + 1, 36, hz == Snap(f) ? orange : Color.FromArgb(140, lit), StringAlignment.Center);
+            Small(cv, (hz / 1e6).ToString("0.0"), px - 18, wr.Bottom + 1, 36, hz == Snap(f) ? orange : Color.FromArgb(140, lit), StringAlignment.Center);
         if (hdSynced)
         {
-            Small(g, "HD", Px(-163) - 10, sr.Y + 2, 20, orange, StringAlignment.Center);
-            Small(g, "HD", Px(163) - 10, sr.Y + 2, 20, orange, StringAlignment.Center);
+            Small(cv, "HD", Px(-163) - 10, sr.Y + 2, 20, orange, StringAlignment.Center);
+            Small(cv, "HD", Px(163) - 10, sr.Y + 2, 20, orange, StringAlignment.Center);
         }
         // tuned station marker
-        using (var tuned = new Pen(Color.FromArgb(170, orange), 1.4f)) g.DrawLine(tuned, Px(0), sr.Y, Px(0), wr.Bottom);
+        cv.Line(Px(0), sr.Y, Px(0), wr.Bottom, Color.FromArgb(170, orange), 1.4f);
         // the clicked channel travels to the center with its highlight
         if (_pending is long pend)
         {
             float a = Px((pend - f) / 1000.0 - 100), b = Px((pend - f) / 1000.0 + 100);
-            using var hb = new SolidBrush(Color.FromArgb(55, lit));
-            g.FillRectangle(hb, a, sr.Y, b - a, sr.Height + 1 + WaterH);
+            cv.Fill(new RectangleF(a, sr.Y, b - a, sr.Height + 1 + WaterH), Color.FromArgb(55, lit));
         }
-        g.Restore(outer);
-        Frame(g, wr, fill: false);
+        cv.PopTranslate();
+        cv.PopClip();
+        Frame(cv, wr, fill: false);
 
         // hover (only when not mid-slide): the channel under the mouse, shaded, with its frequency
         if (_pending == null && HoverX is float hx && hx >= sr.X && hx <= sr.Right)
         {
             long ch = FrequencyAt(hx);
             float a = Px((ch - f) / 1000.0 - 100), b = Px((ch - f) / 1000.0 + 100);
-            var hs = g.Save();
-            g.SetClip(TuneArea);
-            using (var hb = new SolidBrush(Color.FromArgb(40, lit))) g.FillRectangle(hb, a, sr.Y, b - a, sr.Height + 1 + WaterH);
-            g.Restore(hs);
-            using (var hp = new Pen(Color.FromArgb(200, lit), 1)) g.DrawLine(hp, hx, sr.Y, hx, wr.Bottom);
-            string label = ch == Snap(f) ? $"{ch / 1e6:0.0} MHz (tuned)" : $"{ch / 1e6:0.0} MHz  \u00B7  click to tune";
+            cv.PushClip(TuneArea);
+            cv.Fill(new RectangleF(a, sr.Y, b - a, sr.Height + 1 + WaterH), Color.FromArgb(40, lit));
+            cv.PopClip();
+            cv.Line(hx, sr.Y, hx, wr.Bottom, Color.FromArgb(200, lit));
+            string label = ch == Snap(f) ? $"{ch / 1e6:0.0} MHz (tuned)" : $"{ch / 1e6:0.0} MHz  ·  click to tune";
             float w = 150, lx = Math.Clamp(hx + 6, sr.X + 2, sr.Right - w - 2);
-            using (var bg = new SolidBrush(Color.FromArgb(225, 0x03, 0x05, 0x06))) g.FillRectangle(bg, lx - 2, sr.Y + 16, w, 15);
-            Small(g, label, lx, sr.Y + 17, w - 4, lit, StringAlignment.Near);
+            cv.Fill(new RectangleF(lx - 2, sr.Y + 16, w, 15), Color.FromArgb(225, 0x03, 0x05, 0x06));
+            Small(cv, label, lx, sr.Y + 17, w - 4, lit, StringAlignment.Near);
         }
 
         // banner while tuning
         if (DateTime.UtcNow < _bannerUntil)
         {
             string msg = $"TUNED  {f / 1e6:0.0} MHz";
-            using var bf = new Font("Segoe UI Semibold", 13, FontStyle.Regular, GraphicsUnit.Pixel);
-            float bw = g.MeasureString(msg, bf, PointF.Empty, StringFormat.GenericTypographic).Width + 24;
+            float bw = cv.MeasureText(msg, TextKind.Banner) + 24;
             var br = new RectangleF(sr.X + (SpecW - bw) / 2, sr.Y + 6, bw, 22);
             double age = (_bannerUntil - DateTime.UtcNow).TotalSeconds;
             int alpha = (int)(255 * Math.Clamp(age / 0.4, 0, 1));   // fades out over the last 0.4 s
-            using (var bb = new SolidBrush(Color.FromArgb(alpha * 230 / 255, 0x03, 0x05, 0x06)))
-            using (var path = new GraphicsPath())
-            {
-                path.AddRectangle(br);
-                g.FillPath(bb, path);
-            }
-            using (var bp = new Pen(Color.FromArgb(alpha, orange), 1.2f)) g.DrawRectangle(bp, br.X, br.Y, br.Width, br.Height);
-            using var tb = new SolidBrush(Color.FromArgb(alpha, orange));
-            using var fmt = new StringFormat(StringFormat.GenericTypographic) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString(msg, bf, tb, br, fmt);
+            cv.Fill(br, Color.FromArgb(alpha * 230 / 255, 0x03, 0x05, 0x06));
+            cv.Stroke(br, Color.FromArgb(alpha, orange), 1.2f);
+            cv.Text(msg, br, TextKind.Banner, Color.FromArgb(alpha, orange), StringAlignment.Center);
         }
     }
 
@@ -366,7 +412,7 @@ internal sealed class NerdPanel : IDisposable
     public bool Wide
     {
         get => _c.Settings.PanelWideSpan;
-        set { _c.Settings.PanelWideSpan = value; ClearWaterfall(); }
+        set { lock (Sync) { _c.Settings.PanelWideSpan = value; ClearWaterfall(); } }
     }
 
     private double HalfSpanKhz => Wide ? FmReceiver.DeviceRate / 2000 : FmReceiver.HdRate / 2000;
@@ -375,8 +421,13 @@ internal sealed class NerdPanel : IDisposable
     public RectangleF TuneArea { get; private set; }
     /// <summary>The span toggle in the title line.</summary>
     public RectangleF SpanToggle { get; private set; }
+    private float _hoverX = float.NaN;
     /// <summary>Mouse x over the tune area (design coordinates), or null.</summary>
-    public float? HoverX { get; set; }
+    public float? HoverX
+    {
+        get { float h = _hoverX; return float.IsNaN(h) ? null : h; }
+        set => _hoverX = value ?? float.NaN;
+    }
     private float _tuneX0;
 
     /// <summary>The channel (US 200 kHz grid) at a design x position in the spectrum.</summary>
@@ -414,7 +465,10 @@ internal sealed class NerdPanel : IDisposable
     public bool Animating => (DateTime.UtcNow - _panStart).TotalSeconds < PanSeconds || DateTime.UtcNow < _bannerUntil;
 
     /// <summary>The user clicked a channel: remember it so its highlight travels with the slide.</summary>
-    public void BeginTune(long hz) => _pending = hz;
+    public void BeginTune(long hz)
+    {
+        lock (Sync) _pending = hz;
+    }
 
     /// <summary>Notices a frequency change and shifts the history so it lines up with the new center.</summary>
     private void CheckRetune()
@@ -441,22 +495,19 @@ internal sealed class NerdPanel : IDisposable
 
     private void ShiftWaterfall(int dx)
     {
-        var rect = new Rectangle(0, 0, SpecW, WaterH);
-        var data = _water.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppRgb);
-        var row = new int[SpecW];
+        var px = _water.Pixels;
         var shifted = new int[SpecW];
         for (int y = 0; y < WaterH; y++)
         {
-            IntPtr p = data.Scan0 + y * data.Stride;
-            Marshal.Copy(p, row, 0, SpecW);
+            var row = px.AsSpan(y * SpecW, SpecW);
             for (int x = 0; x < SpecW; x++)
             {
                 int sx = x - dx;
                 shifted[x] = sx >= 0 && sx < SpecW ? row[sx] : 0;
             }
-            Marshal.Copy(shifted, 0, p, SpecW);
+            shifted.CopyTo(row);
         }
-        _water.UnlockBits(data);
+        _water.Version++;
     }
 
     private void ShiftSpectrum(int dx)
@@ -471,58 +522,50 @@ internal sealed class NerdPanel : IDisposable
 
     private void ClearWaterfall()
     {
-        using (var g = Graphics.FromImage(_water)) g.Clear(Color.Black);
-        _waterRow = 0;
+        Array.Clear(_water.Pixels);
+        _water.Version++;
+        _newest = 0;
         _specValid = false;
         _wfScaled = false;
     }
 
     private bool _wfScaled;
 
-    /// <summary>Draws a band of waterfall rows upside down (so newer rows end up above older ones).</summary>
-    private void DrawFlipped(Graphics g, Rectangle src, float x, float y)
+    private void DrawMpx(IPanelCanvas cv, float x, float y, Color lit)
     {
-        // rows in the bitmap grow downward with time; on screen the newest goes at the top
-        var dest = new[] { new PointF(x, y + src.Height), new PointF(x + src.Width, y + src.Height), new PointF(x, y) };
-        g.DrawImage(_water, dest, src, GraphicsUnit.Pixel);
-    }
-
-    private void DrawMpx(Graphics g, float x, float y, Color lit)
-    {
-        Title(g, x, y, "FM MULTIPLEX  0–60 kHz", lit);
+        Title(cv, x, y, "FM MULTIPLEX  0–60 kHz", lit);
         var r = new RectangleF(x, y + 18, SpecW, 92);
-        Frame(g, r);
+        Frame(cv, r);
         float Px(double khz) => (float)(r.X + khz / 60 * SpecW);
         // zones
         void Zone(double a, double b, string label)
         {
-            using var br = new SolidBrush(Color.FromArgb(14, lit));
-            g.FillRectangle(br, Px(a), r.Y, Px(b) - Px(a), r.Height);
-            Small(g, label, Px(a), r.Y + 2, Px(b) - Px(a), Color.FromArgb(150, lit), StringAlignment.Center);
+            cv.Fill(RectangleF.FromLTRB(Px(a), r.Y, Px(b), r.Bottom), Color.FromArgb(14, lit));
+            Small(cv, label, Px(a), r.Y + 2, Px(b) - Px(a), Color.FromArgb(150, lit), StringAlignment.Center);
         }
         Zone(0.03, 15, "L+R");
         Zone(23, 53, "L−R (stereo)");
         Zone(54.6, 59.4, "RDS");
-        using (var p = new Pen(Color.FromArgb(120, 0xF7, 0x94, 0x1D), 1) { DashStyle = DashStyle.Dash })
-            g.DrawLine(p, Px(19), r.Y, Px(19), r.Bottom);
-        Small(g, "19k pilot", Px(19) + 2, r.Bottom - 14, 60, Color.FromArgb(200, 0xF7, 0x94, 0x1D), StringAlignment.Near);
+        cv.Line(Px(19), r.Y, Px(19), r.Bottom, Color.FromArgb(120, 0xF7, 0x94, 0x1D), 1, DashStyle.Dash);
+        Small(cv, "19k pilot", Px(19) + 2, r.Bottom - 14, 60, Color.FromArgb(200, 0xF7, 0x94, 0x1D), StringAlignment.Near);
         if (_mpxValid)
         {
             float top = _mpx.Max(), lo = top - 70;
             var pts = new PointF[SpecW];
             for (int c = 0; c < SpecW; c++) pts[c] = new PointF(r.X + c, r.Bottom - Math.Clamp((_mpx[c] - lo) / (top - lo), 0, 1) * (r.Height - 6));
-            using var pen = new Pen(lit, 1.1f);
-            g.DrawLines(pen, pts);
+            cv.Trace(pts, lit, 1.1f);
         }
         foreach (int k in new[] { 0, 15, 19, 38, 53, 57 })
-            Small(g, $"{k}k", Px(k) - 14, r.Bottom + 1, 28, Color.FromArgb(150, lit), StringAlignment.Center);
+            Small(cv, $"{k}k", Px(k) - 14, r.Bottom + 1, 28, Color.FromArgb(150, lit), StringAlignment.Center);
     }
 
-    private void DrawMeters(Graphics g, float x, float y, Color lit, RadioEngine? eng)
+    private static readonly Color MeterRed = Color.FromArgb(0xFF, 0x4A, 0x4A), MeterYellow = Color.FromArgb(0xFF, 0xC8, 0x30);
+
+    private void DrawMeters(IPanelCanvas cv, float x, float y, Color lit, RadioEngine? eng)
     {
         var lv = eng?.Levels ?? (0, 0, 0, 0);
         bool hd = eng?.Blender.PlayingHd == true;
-        Title(g, x, y, $"AUDIO  ·  source {(eng == null ? "—" : hd ? "HD (digital)" : "FM (analog)")}  ·  RMS bar, peak tick, dBFS", lit);
+        Title(cv, x, y, $"AUDIO  ·  source {(eng == null ? "—" : hd ? "HD (digital)" : "FM (analog)")}  ·  RMS bar, peak tick, dBFS", lit);
         // scale -40..0 dBFS, one segment per dB; yellow above -9, red above -3
         const float Range = 40;
         int segs = 40;
@@ -531,20 +574,20 @@ internal sealed class NerdPanel : IDisposable
             float rms = ch == 0 ? lv.Item1 : lv.Item2, peak = ch == 0 ? lv.Item3 : lv.Item4;
             float Frac(float v) => Math.Clamp((20 * MathF.Log10(Math.Max(v, 1e-5f)) + Range) / Range, 0, 1);
             var bar = new RectangleF(x + 18, y + 20 + ch * 14, SpecW - 18, 9);
-            Small(g, ch == 0 ? "L" : "R", x, bar.Y - 3, 14, lit, StringAlignment.Near);
+            Small(cv, ch == 0 ? "L" : "R", x, bar.Y - 3, 14, lit, StringAlignment.Near);
             float sw = bar.Width / segs;
             int litSegs = (int)Math.Round(Frac(rms) * segs), peakSeg = (int)Math.Round(Frac(peak) * segs) - 1;
             for (int s = 0; s < segs; s++)
             {
-                var c = s >= segs - 3 ? Color.FromArgb(0xFF, 0x4A, 0x4A) : s >= segs - 9 ? Color.FromArgb(0xFF, 0xC8, 0x30) : lit;
+                var c = s >= segs - 3 ? MeterRed : s >= segs - 9 ? MeterYellow : lit;
                 bool on = s < litSegs;
-                using var b = new SolidBrush(on ? c : s == peakSeg ? Color.FromArgb(220, c) : Color.FromArgb(22, lit));
-                if (s == peakSeg && !on) g.FillRectangle(b, bar.X + s * sw + sw / 2 - 2, bar.Y, 3, bar.Height);
-                else g.FillRectangle(b, bar.X + s * sw, bar.Y, sw - 2, bar.Height);
+                var fill = on ? c : s == peakSeg ? Color.FromArgb(220, c) : Color.FromArgb(22, lit);
+                if (s == peakSeg && !on) cv.Fill(new RectangleF(bar.X + s * sw + sw / 2 - 2, bar.Y, 3, bar.Height), fill);
+                else cv.Fill(new RectangleF(bar.X + s * sw, bar.Y, sw - 2, bar.Height), fill);
             }
         }
         foreach (int dbMark in new[] { -40, -30, -20, -10, -3, 0 })
-            Small(g, dbMark.ToString(), x + 18 + (dbMark + Range) / Range * (SpecW - 18) - 14, y + 46, 28, Color.FromArgb(150, lit), StringAlignment.Center);
+            Small(cv, dbMark.ToString(), x + 18 + (dbMark + Range) / Range * (SpecW - 18) - 14, y + 46, 28, Color.FromArgb(150, lit), StringAlignment.Center);
     }
 
     private void DrawStats(Graphics g, float x, float y, float w, Color lit, RadioEngine? eng)

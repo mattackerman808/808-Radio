@@ -134,11 +134,23 @@ internal sealed class FaceplateView : Control
             Invalidate();
             if (!_nerd.Animating) _fastPaint.Stop();
         };
-        // the instrument panel's moving parts, once per display refresh while it's open
+        // The instrument panel's moving parts: on the GPU (its own window and render thread, at the display's refresh),
+        // or, if that's unavailable, with GDI+ on the UI thread paced by the frame pacer.
+        _gpu = new GpuPanel(cv =>
+        {
+            _nerd.FrameTick(_c.Engine);
+            _nerd.DrawGpu(cv, PanelArea, Lit);
+        }) { Visible = false };
+        _gpu.Failed += ex => BeginInvoke(() =>
+        {
+            _gpuFailed = true;
+            StopPanelFrames();
+            if (PanelLive) StartPanelFrames();   // carry on with GDI+
+        });
+        Controls.Add(_gpu);
         _pacer = new FramePacer(this, () =>
         {
             if (!PanelLive) { _pacer!.Stop(); return; }
-            PullSpectrum();
             _nerd.FrameTick(_c.Engine);
             InvalidateDesign(_nerd.FastRects);
             if (_slowDue) { _slowDue = false; InvalidateDesign(_nerd.SlowRects); }
@@ -153,7 +165,7 @@ internal sealed class FaceplateView : Control
             if (_open && _anim >= 1 || !_open && _anim <= 0)
             {
                 _animTimer.Stop();
-                if (_open) StartPacer();
+                if (_open) StartPanelFrames();
                 else
                 {
                     OpenLayout?.Invoke(false);   // fully folded back up: shrink the window
@@ -171,22 +183,70 @@ internal sealed class FaceplateView : Control
         if (_animTimer.Enabled) return;
         _open = !_open;
         if (_open) OpenLayout?.Invoke(true);   // grow the window first, then fold the faceplate down
+        else StopPanelFrames();                // GDI+ draws the panel while it folds away
         _animTimer.Start();
     }
 
     private readonly FramePacer _pacer;
-    private bool _slowDue;
+    private readonly GpuPanel _gpu;
+    private bool _slowDue, _gpuFailed;
 
-    /// <summary>(Re)starts the panel's frames at the frame rate setting.</summary>
-    public void StartPacer()
+    /// <summary>(Re)starts the panel's live frames at the frame rate setting: on the GPU if possible.</summary>
+    public void StartPanelFrames()
     {
         if (!PanelLive) return;
-        int fps = _c.Settings.PanelFps;
-        _pacer.Start(Math.Clamp(fps, 10, 120));
+        int fps = _c.Settings.PanelFps;   // 0 = every display refresh
+        if (!_gpuFailed && Environment.GetEnvironmentVariable("R808_NO_GPU") != "1")
+        {
+            _pacer.Stop();
+            PositionGpu();
+            _nerd.LiveOnGpu = true;
+            _gpu.Visible = true;
+            _gpu.Start(fps);
+            return;
+        }
+        _pacer.Start(fps > 0 ? Math.Clamp(fps, 10, 120) : 60);   // GDI+ can't keep up with a fast display: 60 at most
     }
 
-    /// <summary>Frames per second the panel is actually running at (0 when closed).</summary>
-    public double PanelFps => _pacer.Running ? _pacer.Fps : 0;
+    private void StopPanelFrames()
+    {
+        _gpu.Stop();
+        _gpu.Visible = false;
+        _nerd.LiveOnGpu = false;
+        _pacer.Stop();
+        Invalidate();
+    }
+
+    /// <summary>Puts the GPU window over the panel's live column, and gives it the design → pixel transform.</summary>
+    private void PositionGpu()
+    {
+        if (!_gpu.Visible && !PanelLive) return;
+        ComputeTransform();
+        var a = _nerd.LiveArea;
+        if (a.Width <= 0) { _nerd.Layout(PanelArea); a = _nerd.LiveArea; }
+        var px = Rectangle.FromLTRB((int)Math.Floor(_ox + a.Left * _scale), (int)Math.Floor(_oy + a.Top * _scale),
+            (int)Math.Ceiling(_ox + a.Right * _scale), (int)Math.Ceiling(_oy + a.Bottom * _scale));
+        _gpu.Bounds = px;
+        _gpu.SetView(System.Numerics.Matrix3x2.CreateScale(_scale) * System.Numerics.Matrix3x2.CreateTranslation(_ox - px.Left, _oy - px.Top),
+            PanelBackground);
+    }
+
+    protected override void OnSizeChanged(EventArgs e)
+    {
+        base.OnSizeChanged(e);
+        if (_gpu?.Visible == true) PositionGpu();
+    }
+
+    private void ComputeTransform()
+    {
+        _scale = Math.Min(Width / W, Height / H);
+        _ox = (Width - W * _scale) / 2;
+        _oy = (Height - H * _scale) / 2;
+    }
+
+    /// <summary>Frames per second the panel is actually running at (0 when closed), and on what.</summary>
+    public string PanelRenderer => _gpu.Running ? $"GPU {_gpu.Fps:0} fps of {_gpu.RefreshHz:0} Hz, {_gpu.FrameMs:0.00} ms CPU/frame"
+        : _pacer.Running ? $"GDI+ {_pacer.Fps:0} fps" : "closed";
 
     /// <summary>The panel is fully open (not mid-flip).</summary>
     private bool PanelLive => _open && _anim >= 1;
@@ -219,7 +279,8 @@ internal sealed class FaceplateView : Control
             // the frame pacer handles the spectrum; here just the slower sections (the faceplate is folded away), which
             // ride along with the next frame rather than painting on their own between frames
             _nerd.Tick(_c.Engine);
-            _slowDue = true;
+            if (_gpu.Running) InvalidateDesign(_nerd.SlowRects);   // the GPU draws the rest by itself
+            else _slowDue = true;
             return;
         }
         PullSpectrum();
@@ -360,13 +421,14 @@ internal sealed class FaceplateView : Control
         var panel = new RectangleF(44, 26, 912, 490);
         using (var p = Rounded(panel, 8))
         {
-            using (var b = new SolidBrush(Color.FromArgb(0x05, 0x08, 0x0A))) g.FillPath(b, p);
+            using (var b = new SolidBrush(PanelBackground)) g.FillPath(b, p);
             using var pen = new Pen(Color.FromArgb(0x22, 0x28, 0x2F), 1.5f);
             g.DrawPath(pen, p);
         }
     }
 
     private static readonly RectangleF PanelArea = new(44, 26, 912, 490);
+    private static readonly Color PanelBackground = Color.FromArgb(0x05, 0x08, 0x0A);
 
     /// <summary>Open: the instrument panel and the folded faceplate's lip, over the cached chassis.</summary>
     private void DrawChassis(Graphics g)

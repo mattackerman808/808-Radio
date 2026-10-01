@@ -93,7 +93,7 @@ internal sealed class MainForm : Form
         _view.Timing.Reset();
         await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(seconds));
         System.IO.File.WriteAllText(report, $"window {ClientSize.Width} x {ClientSize.Height} px, frame rate setting " +
-            $"{(_c.Settings.PanelFps > 0 ? _c.Settings.PanelFps : "display")}, pacer {_view.PanelFps:0.0} fps\n" + _view.Timing.Report(seconds));
+            $"{(_c.Settings.PanelFps > 0 ? _c.Settings.PanelFps : "display")}, {_view.PanelRenderer}\n" + _view.Timing.Report(seconds));
         Close();
     }
 
@@ -383,14 +383,14 @@ internal sealed class MainForm : Form
         foreach (int fps in AppSettings.PanelFpsChoices)
             fpsMenu.DropDownItems.Add(new ToolStripMenuItem(fps switch
             {
+                0 => "Display refresh rate (smoothest)",
                 30 => "30 fps (lightest)",
-                60 => "60 fps",
-                _ => $"{fps} fps (smoothest; needs a 120 Hz+ display)",
+                _ => $"{fps} fps",
             }, null, (_, _) =>
             {
                 _c.Settings.PanelFps = fps;
                 _c.Settings.Save();
-                _view.StartPacer();
+                _view.StartPanelFrames();
             }) { Checked = _c.Settings.PanelFps == fps });
         m.Items.Add(fpsMenu);
         m.Items.Add(new ToolStripMenuItem("Always on top", null, (_, _) =>
