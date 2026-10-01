@@ -20,8 +20,9 @@
   in a little window (lit on the preset you're on, dimmer on the others, ghost 88.8 on an empty one).
 - **MUTE** blinks in big red letters in the art square while muted (click it to unmute); the speaker key's little
   cross was easy to miss.
-- The HD mini matrix scrolls the station's programs with their formats (`HD1 ADULT HITS  HD2 TOP 40`); click it for the
-  next program.
+- The HD mini matrix pages like a head unit: the programs on air (`HD 1 2 3`), the format of the one you're hearing
+  (`HD1 ADULT HITS`, scrolling if long), the programs again, the next program's format (dim), and round; click it
+  for the next program.
 - **WEAK** lights next to **HD** (and the instrument panel shows Sync "weak", Blend "HD too weak to play") when a station's HD
   is found, with its name and program list, but its bit error rate is too high for the audio to decode, so you're
   hearing the analog. Before, the HD badge and program tags suggested HD was playing.

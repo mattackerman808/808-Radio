@@ -76,8 +76,8 @@ internal sealed class FaceplateView : Control
     private int _subScroll, _subTicks, _subCells = 10;
     // the HD programs mini matrix, scrolled the same way
     private const int HdCells = 13;
-    private string? _hdText;
-    private int _hdScroll, _hdTicks, _hdLen;
+    private string? _hdKey;
+    private int _hdPage, _hdPageCount, _hdPageLen, _hdTicks, _hdScroll;
     private string? _flash;
     private DateTime _flashUntil;
 
@@ -319,7 +319,7 @@ internal sealed class FaceplateView : Control
         // around again
         Marquee(_mainCols.Count / DotMatrix.CellCols, MainCells, ref _scrollChars, ref _scrollTicks);
         Marquee(_subCols.Count / DotMatrix.CellCols, _subCells, ref _subScroll, ref _subTicks);
-        Marquee(_hdLen, HdCells, ref _hdScroll, ref _hdTicks);
+        HdPages();
         Invalidate();
     }
 
@@ -627,6 +627,33 @@ internal sealed class FaceplateView : Control
         Key(g, new RectangleF(142, 212, 52, 22), "disp", NextDisplay);
     }
 
+    /// <summary>
+    /// Pages the HD matrix (10 Hz): the program list holds 3 s; a format holds 3 s if it fits, else holds 1 s, scrolls
+    /// a character every 300 ms to its end, and holds 1 s more; then the next page.
+    /// </summary>
+    private void HdPages()
+    {
+        if (_hdPageCount == 0) { _hdPage = _hdTicks = _hdScroll = 0; return; }
+        _hdTicks++;
+        bool fits = _hdPage % 2 == 0 || _hdPageLen <= HdCells;
+        if (fits)
+        {
+            if (_hdTicks < 30) return;
+        }
+        else
+        {
+            int end = _hdPageLen - HdCells;   // scrolled far enough that the last character shows
+            if (_hdScroll < end)
+            {
+                if (_hdTicks > 10 && (_hdTicks - 10) % 3 == 0) _hdScroll++;
+                return;
+            }
+            if (_hdTicks < 10 + 3 * end + 10) return;
+        }
+        _hdPage = (_hdPage + 1) % _hdPageCount;
+        _hdTicks = _hdScroll = 0;
+    }
+
     private static void Marquee(int len, int cells, ref int chars, ref int ticks)
     {
         if (len <= cells) { chars = ticks = 0; return; }
@@ -729,10 +756,11 @@ internal sealed class FaceplateView : Control
         float trfEnd = Indicator(g, x, 172, "TRAFFIC", trf, false, lit);
         if (trf) _hits.Add(new Hit(new RectangleF(x - 2, 168, trfEnd - x, 22), "trf", () => MapRequested?.Invoke("traffic")));
 
-        // a mini dot matrix after the lights, always there (unlit without HD): the station's HD programs with their
-        // formats, scrolling when they don't fit ("HD1 CLASSIC ROCK   HD2 ADULT HITS"). The one you're hearing lit; the
-        // one you've chosen blinks while it locks in (switching programs, or HD coming back); the rest dimmer, and all
-        // dimmer when HD is too weak to play (WEAK says why). Click it for the next program.
+        // a mini dot matrix after the lights, always there (unlit without HD), cycling through pages: the programs on air
+        // ("HD 1 2 3 4"), the format of the one you're hearing ("HD1 ADULT HITS", scrolling if it's long), the programs
+        // again, the next program's format, and so on round. The one you're hearing is lit, the one you've chosen
+        // blinks while it locks in, the rest are dimmer (all dimmer when HD is too weak to play: WEAK says why).
+        // Click it for the next program.
         {
             const float pitch = 2.2f, cellW = pitch * DotMatrix.CellCols;
             float mx = trfEnd + 14, my = 171;
@@ -741,18 +769,36 @@ internal sealed class FaceplateView : Control
             {
                 var dim = Color.FromArgb(110, lit);
                 bool tooWeak = eng.HdTooWeak, blinkOn = DateTime.UtcNow.Millisecond < 500;
-                // the text, one color per character
+                Color ColorOf(uint p) => p != eng.Program ? dim
+                    : playingHd ? lit : !tooWeak && !_c.Settings.ForceAnalog && blinkOn ? lit : dim;
+                var progs = hd.Programs.Keys.ToList();
+                // the formats to show: the program you're hearing first, then the others in order after it
+                int at = Math.Max(0, progs.IndexOf(eng.Program));
+                var withFormat = Enumerable.Range(0, progs.Count).Select(k => progs[(at + k) % progs.Count])
+                    .Where(p => !string.IsNullOrWhiteSpace(hd.Programs[p])).ToList();
+                string key = string.Join(",", progs) + "|" + eng.Program + "|" + string.Join(",", withFormat.Select(p => hd.Programs[p]));
+                if (key != _hdKey) { _hdKey = key; _hdPage = _hdTicks = _hdScroll = 0; }   // new list or program: start over
+                _hdPageCount = withFormat.Count == 0 ? 1 : 2 * withFormat.Count;            // list, format, list, format...
+                if (_hdPage >= _hdPageCount) _hdPage = 0;
+
                 var chars = new List<(char ch, Color c)>();
-                foreach (var (p, type) in hd.Programs)
+                if (_hdPage % 2 == 0)
                 {
-                    bool chosen = p == eng.Program;
-                    var c = !chosen ? dim : playingHd ? lit : !tooWeak && !_c.Settings.ForceAnalog && blinkOn ? lit : dim;
-                    if (chars.Count > 0) chars.AddRange("  ".Select(ch => (ch, c)));
-                    chars.AddRange($"HD{p + 1}{(string.IsNullOrWhiteSpace(type) ? "" : " " + type.ToUpperInvariant())}".Select(ch => (ch, c)));
+                    bool spaced = progs.Count <= 4;
+                    chars.Add(('H', playingHd ? lit : dim));
+                    chars.Add(('D', playingHd ? lit : dim));
+                    foreach (uint p in progs)
+                    {
+                        if (spaced || chars.Count == 2) chars.Add((' ', dim));
+                        chars.Add(((char)('0' + (p + 1) % 10), ColorOf(p)));
+                    }
                 }
-                string plain = new(chars.Select(t => t.ch).ToArray());
-                if (plain != _hdText) { _hdText = plain; _hdScroll = _hdTicks = 0; }
-                _hdLen = chars.Count;
+                else
+                {
+                    uint p = withFormat[_hdPage / 2];
+                    chars.AddRange($"HD{p + 1} {hd.Programs[p]!.ToUpperInvariant()}".Select(ch => (ch, ColorOf(p))));
+                }
+                _hdPageLen = chars.Count;
                 for (int i = 0; i < HdCells; i++)
                 {
                     int k = i + _hdScroll;
@@ -761,7 +807,7 @@ internal sealed class FaceplateView : Control
                 }
                 _hits.Add(new Hit(new RectangleF(mx - 3, 166, HdCells * cellW + 6, 26), "hdlist", NextProgram));
             }
-            else _hdLen = 0;
+            else _hdPageCount = 0;
         }
 
         // art square: album art / station logo (click to enlarge), else the audio spectrum analyzer; while muted, a big
