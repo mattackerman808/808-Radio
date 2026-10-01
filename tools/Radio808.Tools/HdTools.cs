@@ -140,6 +140,41 @@ internal static class HdTools
         return 0;
     }
 
+    /// <summary>Hammers gain changes and retunes from two threads at once; counts failed control calls.</summary>
+    public static int ControlStress(double seconds)
+    {
+        using var radio = RadioEngine.StartAsync(98_500_000, null, 16.6).GetAwaiter().GetResult();
+        radio.Muted = true;
+        var dev = radio.Device;
+        int gainOps = 0, tuneOps = 0, gainFail = 0, tuneFail = 0;
+        var stop = DateTime.UtcNow.AddSeconds(seconds);
+        var rnd = new Random(1);
+        var gains = dev.Gains;
+        var t = new Thread(() =>
+        {
+            while (DateTime.UtcNow < stop)
+            {
+                try { dev.Gain = gains[rnd.Next(4, gains.Count - 8)]; gainOps++; } catch { gainFail++; }
+                Thread.Sleep(5);
+            }
+        });
+        t.Start();
+        long[] freqs = { 98_500_000, 97_300_000, 92_300_000, 105_700_000 };
+        int i = 0;
+        while (DateTime.UtcNow < stop)
+        {
+            try { radio.Frequency = freqs[i++ % freqs.Length]; tuneOps++; } catch (Exception e) { tuneFail++; Console.WriteLine("  tune failed: " + e.Message); }
+            Thread.Sleep(50);
+        }
+        t.Join();
+        radio.Gain = 16.6;
+        radio.Frequency = 98_500_000;
+        Thread.Sleep(4000);
+        Console.WriteLine($"{gainOps} gain changes ({gainFail} failed), {tuneOps} retunes ({tuneFail} failed)");
+        Console.WriteLine($"afterwards on 98.5: pilot {(radio.Receiver.Stereo.PilotLocked ? "locked" : "NOT locked")}, RDS {radio.Receiver.Rds.CallSign}, HD {(radio.Hd.Synced ? "synced" : "not synced")}");
+        return tuneFail + gainFail == 0 ? 0 : 1;
+    }
+
     /// <summary>Live radio through the default audio device, with keyboard controls.</summary>
     public static int Play(double mhz, double? gainDb, double seconds = 0)
     {

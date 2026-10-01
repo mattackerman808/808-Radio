@@ -95,9 +95,20 @@ public sealed class RadioController : IDisposable
         CancelSeek();
         hz = Math.Clamp(hz, RadioEngine.MinFrequency, RadioEngine.MaxFrequency);
         Settings.FrequencyMhz = hz / 1e6;
-        if (Engine != null) Engine.Frequency = hz;
+        try
+        {
+            if (Engine != null) Engine.Frequency = hz;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write(ex);
+            Message?.Invoke("TUNE FAILED - TRY AGAIN");
+        }
         Changed?.Invoke();
     }
+
+    /// <summary>A short message for the display (errors from controls, etc.).</summary>
+    public event Action<string>? Message;
 
     /// <summary>One channel (200 kHz) up or down, wrapping at the band edges.</summary>
     public void Step(int direction)

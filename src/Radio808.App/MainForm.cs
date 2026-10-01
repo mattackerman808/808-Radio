@@ -56,6 +56,8 @@ internal sealed class MainForm : Form
         Resize += (_, _) => UpdateShape();
 
         _c.Changed += () => _view.Invalidate();
+        _c.Message += m => _view.Flash(m, 2.5);
+        Program.OnError = ex => _view.Flash("ERROR - SEE LOG", 2.5);
         _timer.Tick += (_, _) =>
         {
             _view.Tick();

@@ -76,40 +76,61 @@ public sealed unsafe class RtlSdrDevice : IIqSource
         RtlSdrNative.rtlsdr_set_center_freq(_dev, 100_000_000);
     }
 
+    // librtlsdr isn't thread-safe for control calls: tuning and gain changes both drive the tuner over I2C through a
+    // repeater that's switched on and off around each command, so overlapping calls (e.g. the gain optimizer and a
+    // tune from the UI) corrupt each other ("could not tune (error -9)"). Every control call takes this lock.
+    private readonly object _ctl = new();
+
     public uint SampleRate
     {
-        get => RtlSdrNative.rtlsdr_get_sample_rate(_dev);
-        set => Check(RtlSdrNative.rtlsdr_set_sample_rate(_dev, value), "set sample rate");
+        get { lock (_ctl) return RtlSdrNative.rtlsdr_get_sample_rate(_dev); }
+        set { lock (_ctl) Check(RtlSdrNative.rtlsdr_set_sample_rate(_dev, value), "set sample rate"); }
     }
 
     public long Frequency
     {
-        get => RtlSdrNative.rtlsdr_get_center_freq(_dev);
-        set => Check(RtlSdrNative.rtlsdr_set_center_freq(_dev, (uint)value), "tune");
+        get { lock (_ctl) return RtlSdrNative.rtlsdr_get_center_freq(_dev); }
+        set
+        {
+            lock (_ctl)
+            {
+                // a transient USB control failure shouldn't be fatal: retry a couple of times
+                int r = 0;
+                for (int attempt = 0; attempt < 3; attempt++)
+                {
+                    r = RtlSdrNative.rtlsdr_set_center_freq(_dev, (uint)value);
+                    if (r >= 0) return;
+                    Thread.Sleep(20);
+                }
+                Check(r, "tune");
+            }
+        }
     }
 
     public int PpmCorrection
     {
-        set { if (value != 0) RtlSdrNative.rtlsdr_set_freq_correction(_dev, value); }
+        set { lock (_ctl) if (value != 0) RtlSdrNative.rtlsdr_set_freq_correction(_dev, value); }
     }
 
     /// <summary>Tuner gain in dB, or null for the tuner's automatic gain.</summary>
     public double? Gain
     {
-        get => RtlSdrNative.rtlsdr_get_tuner_gain(_dev) / 10.0;
+        get { lock (_ctl) return RtlSdrNative.rtlsdr_get_tuner_gain(_dev) / 10.0; }
         set
         {
-            if (value is null) { RtlSdrNative.rtlsdr_set_tuner_gain_mode(_dev, 0); return; }
-            RtlSdrNative.rtlsdr_set_tuner_gain_mode(_dev, 1);
-            RtlSdrNative.rtlsdr_set_tuner_gain(_dev, (int)Math.Round(value.Value * 10));
+            lock (_ctl)
+            {
+                if (value is null) { RtlSdrNative.rtlsdr_set_tuner_gain_mode(_dev, 0); return; }
+                RtlSdrNative.rtlsdr_set_tuner_gain_mode(_dev, 1);
+                RtlSdrNative.rtlsdr_set_tuner_gain(_dev, (int)Math.Round(value.Value * 10));
+            }
         }
     }
 
     public bool BiasTee
     {
-        set => RtlSdrNative.rtlsdr_set_bias_tee(_dev, value ? 1 : 0);
+        set { lock (_ctl) RtlSdrNative.rtlsdr_set_bias_tee(_dev, value ? 1 : 0); }
     }
-
     public void Start()
     {
         if (_running) return;
