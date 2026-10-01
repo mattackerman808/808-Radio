@@ -18,6 +18,8 @@
 - The audio analyzer brightens toward the top for depth (one color, the illumination), with brighter peak ticks.
 - Seven-segment readouts: the clock at the end of the small line, like a VFD clock, and each preset key's frequency
   in a little window (lit on the preset you're on, dimmer on the others, ghost 88.8 on an empty one).
+- **MUTE** blinks in big red letters in the art square while muted (click it to unmute); the speaker key's little
+  cross was easy to miss.
 - The HD mini matrix scrolls the station's programs with their formats (`HD1 ADULT HITS  HD2 TOP 40`); click it for the
   next program.
 - **WEAK** lights next to **HD** (and the instrument panel shows Sync "weak", Blend "HD too weak to play") when a station's HD

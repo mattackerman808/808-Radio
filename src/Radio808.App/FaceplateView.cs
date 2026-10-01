@@ -764,9 +764,21 @@ internal sealed class FaceplateView : Control
             else _hdLen = 0;
         }
 
-        // art square: album art / station logo (click to enlarge), else the audio spectrum analyzer
+        // art square: album art / station logo (click to enlarge), else the audio spectrum analyzer; while muted, a big
+        // blinking MUTE (the speaker key's little cross is easy to miss)
         var sq = AnalyzerArea;
         Image? art = synced && _c.Settings.ShowAlbumArt ? Decode(hd?.AlbumArt ?? hd?.StationLogo) : null;
+        if (_c.Settings.Muted)
+        {
+            const float pitch = 4.3f;   // 4 characters of 6 dot columns across the 104-wide square
+            bool on = DateTime.UtcNow.Millisecond < 700;
+            float mh = pitch * DotMatrix.Rows, mw = pitch * (4 * DotMatrix.CellCols - 1);
+            DotMatrix.Draw(g, DotMatrix.Columns("MUTE"), 0, sq.X + (sq.Width - mw) / 2, sq.Y + (sq.Height - mh) / 2, pitch, 4,
+                on ? Alert : Color.FromArgb(40, Alert), Color.FromArgb(20, lit));
+            _hits.Add(new Hit(sq, "unmute", _c.ToggleMute));   // click it to unmute
+            _analyzerShown = false;
+            return;
+        }
         if (art != null)
         {
             var st = g.Save();
