@@ -4,7 +4,7 @@ using Radio808.Core.Dsp;
 namespace Radio808.Core.Radio;
 
 /// <summary>Interleaved stereo audio (L, R, L, R ...).</summary>
-public delegate void AudioHandler(ReadOnlySpan<float> stereo);
+public delegate void AudioHandler(Span<float> stereo);
 
 /// <summary>Complex baseband as separate I and Q arrays.</summary>
 public delegate void BasebandHandler(ReadOnlySpan<float> i, ReadOnlySpan<float> q);

@@ -1,0 +1,424 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Threading;
+using Radio808.Core.Native;
+
+namespace Radio808.Core.Hd;
+
+/// <summary>Snapshot of the HD station state. Replaced wholesale (copy-on-write), so readers never lock.</summary>
+public sealed class HdStatus
+{
+    public bool Synced;
+    public float MerLower, MerUpper, Ber;
+    public string? StationName, Slogan, Message, Alert;
+    public string? Title, Artist, Album;
+    public byte[]? AlbumArt, StationLogo, WeatherMap;
+    public DateTime WeatherTime, TrafficTime;
+    public byte[]?[] TrafficTiles = new byte[]?[9];   // row-major 3x3
+    /// <summary>Audio programs seen (0 = HD1), with their program type name.</summary>
+    public SortedDictionary<uint, string?> Programs = new();
+    public DateTime LastAudio = DateTime.MinValue;
+    public int FilesReceived;
+    public string? LastFile, Error;
+
+    public HdStatus Clone()
+    {
+        var c = (HdStatus)MemberwiseClone();
+        c.Programs = new SortedDictionary<uint, string?>(Programs);
+        return c;
+    }
+}
+
+/// <summary>
+/// Owns the libnrsc5 session and a worker thread. The receiver hands 744,187.5 S/s baseband blocks to
+/// <see cref="Enqueue"/> (device thread, never blocks); the worker pipes them into nrsc5, whose callbacks (on the
+/// worker thread) update <see cref="Status"/> and feed audio to the <see cref="HdBlender"/>.
+/// </summary>
+public sealed unsafe class HdDecoder : IDisposable
+{
+    private sealed class Block
+    {
+        public float[] Data = Array.Empty<float>();
+        public int Floats;
+        public int Generation;
+    }
+
+    private readonly BlockingCollection<Block?> _queue = new(64);   // ~3 s of 64 KiB device buffers
+    private readonly ConcurrentBag<Block> _pool = new();
+    private readonly HdBlender _blender;
+    private readonly Nrsc5Native.Callback _callback;   // kept alive while nrsc5 holds it
+    private readonly object _lock = new();
+    private readonly Dictionary<uint, byte[]> _lotImages = new();
+    private readonly ConcurrentDictionary<uint, byte[]> _programArt = new(), _programLogo = new();
+
+    private Thread? _thread;
+    private volatile bool _running;
+    private IntPtr _nrsc5;
+    private HdStatus _status = new();
+    private volatile uint _program;
+    private volatile int _generation;      // bumped on retune; blocks from older generations are discarded
+    private int _sessionGeneration = -1;
+    private int _pendingArtLot = -1;
+    private int _dropped;
+    private int _inFlight;
+
+    public HdDecoder(HdBlender blender)
+    {
+        _blender = blender;
+        _callback = OnEvent;
+    }
+
+    public static string LibraryVersion => Nrsc5Native.Version();
+    public HdStatus Status { get { lock (_lock) return _status; } }
+    public int DroppedBlocks => _dropped;
+
+    /// <summary>Selected audio program (0 = HD1 ... 7 = HD8).</summary>
+    public uint Program
+    {
+        get => _program;
+        set
+        {
+            if (_program == value) return;
+            _program = value;
+            _blender.Program = (int)value;
+            _blender.Clear();
+            _pendingArtLot = -1;
+            _programArt.TryGetValue(value, out var art);
+            _programLogo.TryGetValue(value, out var logo);
+            Update(s =>
+            {
+                s.Title = s.Artist = s.Album = null;
+                s.AlbumArt = art;
+                s.StationLogo = logo ?? s.StationLogo;
+            });
+        }
+    }
+
+    /// <summary>The station changed: the next block starts a fresh nrsc5 session.</summary>
+    public void Retune()
+    {
+        Interlocked.Increment(ref _generation);
+        _blender.Clear();
+        lock (_lock) _status = new HdStatus();
+    }
+
+    public void Start()
+    {
+        if (_running) return;
+        if (_thread != null && !_thread.Join(10000)) return;
+        while (_queue.TryTake(out var stale)) if (stale != null) _pool.Add(stale);
+        _inFlight = 0;
+        _running = true;
+        _thread = new Thread(Run) { IsBackground = true, Name = "HD decoder", Priority = ThreadPriority.AboveNormal };
+        _thread.Start();
+    }
+
+    public void Stop()
+    {
+        if (_thread == null) return;
+        _running = false;
+        // Discard the backlog and wake the worker. The worker closes the nrsc5 session itself: closing it from
+        // here while a pipe call is in flight would be a use-after-free.
+        while (_queue.TryTake(out var b)) if (b != null) { _pool.Add(b); Interlocked.Decrement(ref _inFlight); }
+        _queue.Add(null);
+        if (_thread.Join(10000)) _thread = null;
+        _blender.Clear();
+        lock (_lock) _status = new HdStatus();
+    }
+
+    /// <summary>Blocks queued or being decoded.</summary>
+    public int Pending => Volatile.Read(ref _inFlight);
+
+    /// <summary>Offline use: waits until every queued block has been decoded.</summary>
+    public void WaitIdle()
+    {
+        while (_running && Volatile.Read(ref _inFlight) > 0) Thread.Sleep(1);
+    }
+
+    /// <summary>Baseband at 744,187.5 S/s as separate I and Q. Copies and hands off; never blocks.</summary>
+    public void Enqueue(ReadOnlySpan<float> i, ReadOnlySpan<float> q)
+    {
+        if (!_running || i.Length == 0) return;
+        if (!_pool.TryTake(out var b)) b = new Block();
+        int n = 2 * i.Length;
+        if (b.Data.Length < n) b.Data = new float[n];
+        for (int k = 0; k < i.Length; k++) { b.Data[2 * k] = i[k]; b.Data[2 * k + 1] = q[k]; }
+        b.Floats = n;
+        b.Generation = _generation;
+        Interlocked.Increment(ref _inFlight);
+        if (!_queue.TryAdd(b))
+        {
+            Interlocked.Decrement(ref _inFlight);
+            _dropped++;
+            _pool.Add(b);
+        }
+    }
+
+    private void Run()
+    {
+        try
+        {
+            while (_running)
+            {
+                var b = _queue.Take();
+                if (b == null || !_running) break;
+                try { ProcessBlock(b); }
+                finally { _pool.Add(b); Interlocked.Decrement(ref _inFlight); }
+            }
+        }
+        catch (Exception ex)
+        {
+            Update(s => s.Error = ex.Message);
+            _running = false;
+        }
+        finally
+        {
+            CloseSession();   // only this thread ever touches the nrsc5 session
+            _sessionGeneration = -1;
+        }
+    }
+
+    private void ProcessBlock(Block b)
+    {
+        int gen = _generation;
+        if (b.Generation != gen) return;   // from before the last retune
+        if (gen != _sessionGeneration)
+        {
+            OpenSession();
+            _sessionGeneration = gen;
+        }
+        fixed (float* p = b.Data)
+            Nrsc5Native.nrsc5_pipe_samples_cf32(_nrsc5, p, (uint)b.Floats);
+    }
+
+    private void OpenSession()
+    {
+        CloseSession();
+        if (Nrsc5Native.nrsc5_open_pipe(out _nrsc5) != 0 || _nrsc5 == IntPtr.Zero)
+            throw new InvalidOperationException("nrsc5_open_pipe failed");
+        Nrsc5Native.nrsc5_set_mode(_nrsc5, Nrsc5Native.ModeFm);
+        Nrsc5Native.nrsc5_set_callback(_nrsc5, _callback, IntPtr.Zero);
+        Nrsc5Native.nrsc5_start(_nrsc5);
+
+        _blender.Clear();
+        _lotImages.Clear();
+        _programArt.Clear();
+        _programLogo.Clear();
+        _pendingArtLot = -1;
+        _program = 0;
+        _blender.Program = 0;
+        lock (_lock) _status = new HdStatus();
+    }
+
+    private void CloseSession()
+    {
+        if (_nrsc5 == IntPtr.Zero) return;
+        Nrsc5Native.nrsc5_close(_nrsc5);
+        _nrsc5 = IntPtr.Zero;
+    }
+
+    // ---- nrsc5 callbacks (worker thread) ----
+
+    private void OnEvent(IntPtr e, IntPtr opaque)
+    {
+        try
+        {
+            switch (Nrsc5Native.EventType(e))
+            {
+                case Nrsc5Native.EventSync:
+                    Update(s => s.Synced = true);
+                    break;
+                case Nrsc5Native.EventLostSync:
+                    Update(s => s.Synced = false);
+                    _blender.TimelineLost();
+                    break;
+                case Nrsc5Native.EventMer:
+                    float lo = Nrsc5Native.F32(e, 8), up = Nrsc5Native.F32(e, 12);
+                    Update(s => { s.MerLower = lo; s.MerUpper = up; });
+                    break;
+                case Nrsc5Native.EventBer:
+                    float ber = Nrsc5Native.F32(e, 8);
+                    Update(s => s.Ber = ber);
+                    break;
+                case Nrsc5Native.EventAudio:
+                    OnAudio(e);
+                    break;
+                case Nrsc5Native.EventId3:
+                    OnId3(e);
+                    break;
+                case Nrsc5Native.EventLot:
+                    OnLot(e);
+                    break;
+                case Nrsc5Native.EventAudioService:
+                    uint prog = Nrsc5Native.U32(e, 8), type = Nrsc5Native.U32(e, 16);
+                    string? typeName = Nrsc5Native.ProgramTypeName(type);
+                    Update(s => s.Programs[prog] = typeName);
+                    break;
+                case Nrsc5Native.EventStationName:
+                    string? name = Nrsc5Native.Str(e, 8);
+                    Update(s => s.StationName = name);
+                    break;
+                case Nrsc5Native.EventStationSlogan:
+                    string? slogan = Nrsc5Native.Str(e, 8);
+                    Update(s => s.Slogan = slogan);
+                    break;
+                case Nrsc5Native.EventStationMessage:
+                    string? msg = Nrsc5Native.Str(e, 8);
+                    Update(s => s.Message = msg);
+                    break;
+                case Nrsc5Native.EventEmergencyAlert:
+                    string? alert = Nrsc5Native.Str(e, 8);
+                    Update(s => s.Alert = alert);
+                    break;
+                case Nrsc5Native.EventHereImage:
+                    OnHereImage(e);
+                    break;
+            }
+        }
+        catch
+        {
+            // Never let an exception unwind into native code.
+        }
+    }
+
+    private void OnAudio(IntPtr e)
+    {
+        uint program = Nrsc5Native.U32(e, 8);
+        var data = Nrsc5Native.Ptr(e, 16);
+        long count = Nrsc5Native.Size(e, 24);   // int16 values, interleaved stereo
+        uint flags = Nrsc5Native.U32(e, 32);
+
+        if (!_status.Programs.ContainsKey(program))
+            Update(s => s.Programs[program] = null);
+        if (program != _program) return;
+        _blender.Add((short*)data, (int)count, (flags & Nrsc5Native.AudioFlagUnavailable) != 0);
+        if ((flags & Nrsc5Native.AudioFlagUnavailable) == 0)
+            Update(s => s.LastAudio = DateTime.UtcNow);
+    }
+
+    private void OnId3(IntPtr e)
+    {
+        if (Nrsc5Native.U32(e, 8) != _program) return;
+        string? title = Nrsc5Native.Str(e, 16), artist = Nrsc5Native.Str(e, 24), album = Nrsc5Native.Str(e, 32);
+        uint xhdrMime = Nrsc5Native.U32(e, 64);
+        int xhdrLot = Nrsc5Native.I32(e, 72);
+
+        byte[]? art = null;
+        if (xhdrMime == Nrsc5Native.MimePrimaryImage && xhdrLot >= 0)
+        {
+            _pendingArtLot = xhdrLot;
+            _lotImages.TryGetValue((uint)xhdrLot, out art);
+        }
+        Update(s =>
+        {
+            if (title != null) s.Title = title;
+            if (artist != null) s.Artist = artist;
+            if (album != null) s.Album = album;
+            if (art != null) s.AlbumArt = art;
+        });
+    }
+
+    private void OnLot(IntPtr e)
+    {
+        uint lot = Nrsc5Native.U32(e, 12);
+        uint size = Nrsc5Native.U32(e, 16);
+        string? name = Nrsc5Native.Str(e, 24);
+        var data = Nrsc5Native.Ptr(e, 32);
+        var service = Nrsc5Native.Ptr(e, 48);
+        var component = Nrsc5Native.Ptr(e, 56);
+
+        Update(s => { s.FilesReceived++; s.LastFile = name; });
+        if (data == IntPtr.Zero || size < 8 || size > 4 * 1024 * 1024) return;
+
+        var bytes = new byte[size];
+        Marshal.Copy(data, bytes, 0, (int)size);
+        if (!IsImage(bytes)) return;
+
+        // The SIG component says what the file is (album art vs. logo); the SIG audio service it belongs to says
+        // which program (its audio component's port field).
+        uint componentMime = component == IntPtr.Zero ? 0 : Nrsc5Native.U32(component, 20);
+        int program = -1;
+        if (service != IntPtr.Zero && Marshal.ReadByte(service, 8) == Nrsc5Native.SigServiceAudio)
+        {
+            var audioComponent = Nrsc5Native.Ptr(service, 32);
+            program = audioComponent != IntPtr.Zero
+                ? Marshal.ReadByte(audioComponent, 12)
+                : Nrsc5Native.U16(service, 10) - 1;
+        }
+        bool current = program < 0 || program == _program;
+
+        if (componentMime == Nrsc5Native.MimeStationLogo)
+        {
+            if (program >= 0) _programLogo[(uint)program] = bytes;
+            if (current) Update(s => s.StationLogo = bytes);
+            return;
+        }
+
+        if (_lotImages.Count > 64) _lotImages.Clear();
+        _lotImages[lot] = bytes;
+        if (componentMime == Nrsc5Native.MimePrimaryImage && program >= 0)
+            _programArt[(uint)program] = bytes;
+        if ((int)lot == _pendingArtLot || (componentMime == Nrsc5Native.MimePrimaryImage && current))
+            Update(s => s.AlbumArt = bytes);
+    }
+
+    private void OnHereImage(IntPtr e)
+    {
+        int type = Nrsc5Native.I32(e, 8);
+        int n1 = Nrsc5Native.I32(e, 16);
+        string name = Nrsc5Native.Str(e, 48) ?? "";
+        uint size = Nrsc5Native.U32(e, 56);
+        var data = Nrsc5Native.Ptr(e, 64);
+        if (data == IntPtr.Zero || size == 0 || size > 4 * 1024 * 1024) return;
+
+        var bytes = new byte[size];
+        Marshal.Copy(data, bytes, 0, (int)size);
+
+        if (type == Nrsc5Native.HereImageWeather)
+        {
+            Update(s => { s.WeatherMap = bytes; s.WeatherTime = DateTime.Now; s.FilesReceived++; s.LastFile = name; });
+        }
+        else if (type == Nrsc5Native.HereImageTraffic)
+        {
+            // Tiles are named like "trafficMap_<row>_<col>_rdhs.png" (1-based); fall back to n1 order.
+            int idx = n1 - 1;
+            var parts = name.Split('_');
+            if (parts.Length >= 3 && int.TryParse(parts[1], out int row) && int.TryParse(parts[2], out int col)
+                && row is >= 1 and <= 3 && col is >= 1 and <= 3)
+                idx = (row - 1) * 3 + (col - 1);
+            if (idx < 0 || idx > 8) return;
+            Update(s =>
+            {
+                var tiles = (byte[]?[])s.TrafficTiles.Clone();
+                tiles[idx] = bytes;
+                s.TrafficTiles = tiles;
+                s.TrafficTime = DateTime.Now;
+                s.FilesReceived++;
+                s.LastFile = name;
+            });
+        }
+    }
+
+    private static bool IsImage(byte[] b) =>
+        (b[0] == 0xFF && b[1] == 0xD8) ||                                   // JPEG
+        (b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) ||   // PNG
+        (b[0] == 'G' && b[1] == 'I' && b[2] == 'F');                         // GIF
+
+    private void Update(Action<HdStatus> change)
+    {
+        lock (_lock)
+        {
+            var s = _status.Clone();
+            change(s);
+            _status = s;
+        }
+    }
+
+    public void Dispose()
+    {
+        Stop();
+        _queue.Dispose();
+    }
+}
