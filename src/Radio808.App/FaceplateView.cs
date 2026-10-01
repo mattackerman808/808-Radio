@@ -130,17 +130,20 @@ internal sealed class FaceplateView : Control
         _nerd = new NerdPanel(c);
         _fastPaint.Tick += (_, _) =>
         {
-            if (PanelLive) InvalidateDesign(_nerd.FastRects); else Invalidate();
+            if (PanelLive) { _fastPaint.Stop(); return; }   // the frame pacer is already painting every refresh
+            Invalidate();
             if (!_nerd.Animating) _fastPaint.Stop();
         };
-        // the instrument panel's moving parts, at ~30 fps while it's open
-        _frameTimer.Tick += (_, _) =>
+        // the instrument panel's moving parts, once per display refresh while it's open
+        _pacer = new FramePacer(this, () =>
         {
-            if (!PanelLive) { _frameTimer.Stop(); return; }
+            if (!PanelLive) { _pacer!.Stop(); return; }
             PullSpectrum();
             _nerd.FrameTick(_c.Engine);
             InvalidateDesign(_nerd.FastRects);
-        };
+            if (_slowDue) { _slowDue = false; InvalidateDesign(_nerd.SlowRects); }
+            Update();   // paint now, so the frame is on screen before the pacer asks for the next one
+        });
         // any retune (keys, presets, seek) slides the open spectrum too
         c.Changed += () => { if (_open) _fastPaint.Start(); };
         _animTimer.Tick += (_, _) =>
@@ -150,7 +153,7 @@ internal sealed class FaceplateView : Control
             if (_open && _anim >= 1 || !_open && _anim <= 0)
             {
                 _animTimer.Stop();
-                if (_open) _frameTimer.Start();
+                if (_open) StartPacer();
                 else
                 {
                     OpenLayout?.Invoke(false);   // fully folded back up: shrink the window
@@ -171,7 +174,19 @@ internal sealed class FaceplateView : Control
         _animTimer.Start();
     }
 
-    private readonly Timer _frameTimer = new() { Interval = 33 };
+    private readonly FramePacer _pacer;
+    private bool _slowDue;
+
+    /// <summary>(Re)starts the panel's frames at the frame rate setting.</summary>
+    public void StartPacer()
+    {
+        if (!PanelLive) return;
+        int fps = _c.Settings.PanelFps;
+        _pacer.Start(Math.Clamp(fps, 10, 120));
+    }
+
+    /// <summary>Frames per second the panel is actually running at (0 when closed).</summary>
+    public double PanelFps => _pacer.Running ? _pacer.Fps : 0;
 
     /// <summary>The panel is fully open (not mid-flip).</summary>
     private bool PanelLive => _open && _anim >= 1;
@@ -201,9 +216,10 @@ internal sealed class FaceplateView : Control
     {
         if (PanelLive)
         {
-            // the frame timer handles the spectrum; here just the slower sections (the faceplate is folded away)
+            // the frame pacer handles the spectrum; here just the slower sections (the faceplate is folded away), which
+            // ride along with the next frame rather than painting on their own between frames
             _nerd.Tick(_c.Engine);
-            InvalidateDesign(_nerd.SlowRects);
+            _slowDue = true;
             return;
         }
         PullSpectrum();
@@ -948,7 +964,7 @@ internal sealed class FaceplateView : Control
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _hold.Dispose(); _art?.Dispose(); }
+        if (disposing) { _hold.Dispose(); _art?.Dispose(); _pacer.Dispose(); _chassisBg?.Dispose(); }
         base.Dispose(disposing);
     }
 }

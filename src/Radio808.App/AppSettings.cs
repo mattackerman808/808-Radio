@@ -46,6 +46,12 @@ public sealed class AppSettings
     public bool AlwaysOnTop { get; set; }
     /// <summary>Instrument panel spectrum span: true = the dongle's full 1.49 MHz, false = the 744 kHz HD baseband.</summary>
     public bool PanelWideSpan { get; set; } = true;
+    /// <summary>
+    /// Instrument panel frames per second: 30, 60 or 120 (the display's refresh should be a multiple, for even motion).
+    /// At 2600 px wide a frame costs ~6 ms of UI thread: 60 fps uses ~40% of it, 120 ~70%.
+    /// </summary>
+    public int PanelFps { get; set; } = 60;
+    public static readonly int[] PanelFpsChoices = { 30, 60, 120 };
     public int[]? WindowBounds { get; set; }
 
     private static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "808Radio");

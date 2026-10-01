@@ -4,10 +4,13 @@
 
 - Instrument panel: the network dongle's host and data rate share one **Source** line, so the statistics no
   longer run into the equalizer section; shorter Tuning and Gain lines (they were cut off).
-- Instrument panel runs at ~30 fps (was 10): the spectrum, waterfall, multiplex and meters update every frame, the
-  waterfall scrolls at 20 averaged rows a second, and painting a frame costs less than half as much (the chassis is
-  cached, and only the sections that changed are redrawn). Measured at 2600 px wide: 9 → 31 fps, 21 → 9 ms per frame.
-- `808Radio.exe --bench <recordings> <seconds> <report> [width]`: paint timings with the panel open.
+- Instrument panel runs at 60 fps (was 10), or 30 or 120 (right-click → Panel frame rate). Frames are paced off the
+  display's refresh (DwmFlush) rather than a 15.6 ms timer, so they're evenly spaced; the spectrum, waterfall,
+  multiplex and meters update every frame, and the waterfall glides between rows instead of jumping. Painting a frame
+  costs a quarter of what it did: WinForms was allocating a new full-window back buffer on every paint (its default
+  MaximumBuffer is 225 x 96), the chassis is cached, and only the sections that change are redrawn. At 2600 x 1482 px:
+  21 → 6 ms per frame; 120 fps uses ~70% of the UI thread, 60 fps ~40%.
+- `808Radio.exe --bench <recordings> <seconds> <report> [width] [fps]`: paint timings with the panel open.
 
 ## 0.2.0 (2026-10-01)
 

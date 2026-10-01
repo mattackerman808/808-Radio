@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -13,7 +13,7 @@ internal static class Program
     private static void Main(string[] args)
     {
         string? replay = args.Length >= 2 && args[0] == "--replay" ? args[1] : null;
-        // --bench <recordings> <seconds> <report.txt> [width]: times painting with the instrument panel open, playing recordings
+        // --bench <recordings> <seconds> <report.txt> [width] [fps]: times painting with the instrument panel open, playing recordings
         // muted, without touching the settings file, then exits (for development; runs beside a normal copy)
         bool bench = args.Length >= 4 && args[0] == "--bench";
         if (bench)
@@ -42,8 +42,16 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         var settings = AppSettings.Load();
-        if (bench) { settings.Muted = true; settings.FrequencyMhz = 97.3; }
+        if (bench)
+        {
+            settings.Muted = true;
+            settings.FrequencyMhz = 97.3;
+            if (args.Length > 5) settings.PanelFps = int.Parse(args[5]);   // optional frame rate setting (0 = display)
+        }
         var controller = new RadioController(settings) { ReplayDirectory = replay };
+        // WinForms double buffering keeps its back buffer only up to MaximumBuffer (225 x 96 by default); a bigger window
+        // got a new full-size buffer allocated, cleared and freed on every paint (~4-5 ms per frame on a 4K screen)
+        System.Drawing.BufferedGraphicsManager.Current.MaximumBuffer = new System.Drawing.Size(8192, 8192);
         Application.Run(new MainForm(controller));
     }
 }

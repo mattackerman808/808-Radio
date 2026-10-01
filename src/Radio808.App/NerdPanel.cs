@@ -49,6 +49,17 @@ internal sealed class NerdPanel : IDisposable
     }
 
     private const double RowSeconds = 0.05;   // waterfall: 20 rows a second
+
+    private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
+    private double _specAt, _mpxAt, _lastRowAt;
+
+    /// <summary>Exponential smoothing weight for an update now, with time constant <paramref name="tau"/> seconds.</summary>
+    private static float Alpha(ref double lastAt, double tau)
+    {
+        double now = Clock.Elapsed.TotalSeconds, dt = Math.Clamp(now - lastAt, 0.001, 1);
+        lastAt = now;
+        return (float)(1 - Math.Exp(-dt / tau));
+    }
     private readonly float[] _rowAcc = new float[SpecW];
     private int _rowCount;
     private DateTime _nextRow = DateTime.MinValue;
@@ -63,8 +74,10 @@ internal sealed class NerdPanel : IDisposable
         if (DateTime.UtcNow < _ignoreRowsUntil) return;   // samples still in flight from the old frequency
         // each column covers its exact share of the bins (4096 / 592 isn't an integer; truncating it squeezed the
         // spectrum toward the left and put the signal ~100 kHz off its markers)
-        // The trace follows every spectrum (one per frame, ~30/s); the waterfall gets a row every RowSeconds, the average
-        // of the spectra since the last one (smoother than single spectra, and ~7 s of history in the 150 rows).
+        // The trace follows every spectrum (one per frame); the waterfall gets a row every RowSeconds, the average of the
+        // spectra since the last one (smoother than single spectra, and ~7 s of history in the 150 rows). The trace's
+        // smoothing is by time (~150 ms), so it looks the same at any frame rate.
+        float specAlpha = Alpha(ref _specAt, 0.15);
         var row = new float[SpecW];
         for (int c = 0; c < SpecW; c++)
         {
@@ -74,7 +87,7 @@ internal sealed class NerdPanel : IDisposable
             float lin = sum / (k1 - k0);
             _rowAcc[c] += lin;
             row[c] = 10 * MathF.Log10(lin + 1e-20f);
-            _spec[c] = _specValid ? _spec[c] + 0.2f * (row[c] - _spec[c]) : row[c];
+            _spec[c] = _specValid ? _spec[c] + specAlpha * (row[c] - _spec[c]) : row[c];
         }
         _specValid = true;
         _rowCount++;
@@ -96,6 +109,7 @@ internal sealed class NerdPanel : IDisposable
         _wfTop += rate * (top - _wfTop);
         _wfScaled = true;
         WriteWaterfallRow(row);
+        _lastRowAt = Clock.Elapsed.TotalSeconds;
     }
 
     private void WriteWaterfallRow(float[] row)
@@ -137,13 +151,14 @@ internal sealed class NerdPanel : IDisposable
         {
             for (int i = 0; i < 4096; i++) { _mpxIq[2 * i] = _mpxIn[i]; _mpxIq[2 * i + 1] = 0; }
             _mpxFft.PowerDb(_mpxIq, _re, _im, _mpxDb);   // index 2048 = DC
+            float mpxAlpha = Alpha(ref _mpxAt, 0.24);
             double binHz = FmReceiver.MpxRate / 4096;
             for (int c = 0; c < SpecW; c++)
             {
                 double f0 = c * 60_000.0 / SpecW, f1 = (c + 1) * 60_000.0 / SpecW;
                 float m = -200;
                 for (int k = (int)(f0 / binHz); k <= (int)(f1 / binHz); k++) m = Math.Max(m, _mpxDb[2048 + k]);
-                _mpx[c] = _mpxValid ? _mpx[c] + 0.13f * (m - _mpx[c]) : m;   // ~ the old 0.35 at 10 Hz
+                _mpx[c] = _mpxValid ? _mpx[c] + mpxAlpha * (m - _mpx[c]) : m;
             }
             _mpxValid = true;
         }
@@ -277,9 +292,15 @@ internal sealed class NerdPanel : IDisposable
         var state = g.Save();
         g.InterpolationMode = InterpolationMode.NearestNeighbor;
         g.PixelOffsetMode = PixelOffsetMode.Half;
+        g.SetClip(wr, CombineMode.Intersect);
+        // glide: between rows, the image moves down by the fraction of a row that's due, and the newest row stretches
+        // into the gap above it, so the waterfall scrolls continuously instead of jumping a row at a time
+        float glide = _specValid ? (float)Math.Clamp((Clock.Elapsed.TotalSeconds - _lastRowAt) / RowSeconds, 0, 1) : 0;
         int topRows = newest + 1;
-        DrawFlipped(g, new Rectangle(0, 0, SpecW, topRows), wr.X, wr.Y);
-        if (topRows < WaterH) DrawFlipped(g, new Rectangle(0, topRows, SpecW, WaterH - topRows), wr.X, wr.Y + topRows);
+        DrawFlipped(g, new Rectangle(0, 0, SpecW, topRows), wr.X, wr.Y + glide);
+        if (topRows < WaterH) DrawFlipped(g, new Rectangle(0, topRows, SpecW, WaterH - topRows), wr.X, wr.Y + glide + topRows);
+        if (glide > 0)
+            g.DrawImage(_water, new RectangleF(wr.X, wr.Y, SpecW, glide), new RectangleF(0, newest, SpecW, 1), GraphicsUnit.Pixel);
         g.Restore(state);
         // axis: channel frequencies, the tuned one brighter
         foreach (var (hz, px) in channels)

@@ -112,7 +112,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 For development, `dotnet build src/Radio808.App -c Release` after the native libraries exist. `808Radio.exe --replay
 <folder>` plays recordings (`97.3.cu8`, `st98.5.cu8`, …: 8-bit I/Q at 1,488,375 S/s) instead of a dongle.
-`808Radio.exe --bench <folder> <seconds> <report.txt> [width]` opens the instrument panel on those recordings (muted,
+`808Radio.exe --bench <folder> <seconds> <report.txt> [width] [fps]` opens the instrument panel on those recordings (muted,
 settings untouched, beside a normal copy) and writes paint timings per section.
 
 ## Tools

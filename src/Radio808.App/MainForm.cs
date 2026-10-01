@@ -92,7 +92,8 @@ internal sealed class MainForm : Form
         await System.Threading.Tasks.Task.Delay(3000);   // the flip, and the waterfall filling
         _view.Timing.Reset();
         await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(seconds));
-        System.IO.File.WriteAllText(report, $"window {ClientSize.Width} x {ClientSize.Height} px\n" + _view.Timing.Report(seconds));
+        System.IO.File.WriteAllText(report, $"window {ClientSize.Width} x {ClientSize.Height} px, frame rate setting " +
+            $"{(_c.Settings.PanelFps > 0 ? _c.Settings.PanelFps : "display")}, pacer {_view.PanelFps:0.0} fps\n" + _view.Timing.Report(seconds));
         Close();
     }
 
@@ -378,6 +379,20 @@ internal sealed class MainForm : Form
             _c.SetBiasTee(!_c.Settings.BiasTee);
         }) { Checked = _c.Settings.BiasTee });
         m.Items.Add(new ToolStripSeparator());
+        var fpsMenu = new ToolStripMenuItem("Panel frame rate");
+        foreach (int fps in AppSettings.PanelFpsChoices)
+            fpsMenu.DropDownItems.Add(new ToolStripMenuItem(fps switch
+            {
+                30 => "30 fps (lightest)",
+                60 => "60 fps",
+                _ => $"{fps} fps (smoothest; needs a 120 Hz+ display)",
+            }, null, (_, _) =>
+            {
+                _c.Settings.PanelFps = fps;
+                _c.Settings.Save();
+                _view.StartPacer();
+            }) { Checked = _c.Settings.PanelFps == fps });
+        m.Items.Add(fpsMenu);
         m.Items.Add(new ToolStripMenuItem("Always on top", null, (_, _) =>
         {
             _c.Settings.AlwaysOnTop = !_c.Settings.AlwaysOnTop;
