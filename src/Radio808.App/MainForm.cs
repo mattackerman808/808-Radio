@@ -37,6 +37,7 @@ internal sealed class MainForm : Form
 
         _view = new FaceplateView(_c) { Dock = DockStyle.Fill };
         _view.MapRequested += ShowMap;
+        _view.ArtRequested += ShowArt;
         _view.MenuRequested += p => BuildMenu().Show(_view, p);
         _view.DragRequested += () =>
         {
@@ -90,6 +91,13 @@ internal sealed class MainForm : Form
         if (width > 0) ClientSize = new Size(width, (int)Math.Round(width * DesignH / DesignW));
         if (Environment.GetEnvironmentVariable("R808_BENCH_CLOSED") != "1") _view.ToggleOpen();   // =1: time the faceplate
         await System.Threading.Tasks.Task.Delay(3000);   // the flip, and the waterfall filling
+        if (Environment.GetEnvironmentVariable("R808_BENCH_ART") == "1")   // =1: pop out the art (or a test card)
+        {
+            var hd = _c.Engine?.Hd;
+            byte[]? bytes = hd?.AlbumArt ?? hd?.StationLogo;
+            using Image img = bytes != null ? Image.FromStream(new System.IO.MemoryStream(bytes)) : TestCard();
+            ShowArt(img, _view.ArtSquareOnScreen);
+        }
         _view.Timing.Reset();
         await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(seconds));
         System.IO.File.WriteAllText(report, $"window {ClientSize.Width} x {ClientSize.Height} px, frame rate setting " +
@@ -393,6 +401,12 @@ internal sealed class MainForm : Form
                 _view.StartPanelFrames();
             }) { Checked = _c.Settings.PanelFps == fps });
         m.Items.Add(fpsMenu);
+        m.Items.Add(new ToolStripMenuItem("Album art on the display (off: spectrum analyzer)", null, (_, _) =>
+        {
+            _c.Settings.ShowAlbumArt = !_c.Settings.ShowAlbumArt;
+            _c.Settings.Save();
+            _view.Invalidate();
+        }) { Checked = _c.Settings.ShowAlbumArt });
         m.Items.Add(new ToolStripMenuItem("Always on top", null, (_, _) =>
         {
             _c.Settings.AlwaysOnTop = !_c.Settings.AlwaysOnTop;
@@ -408,6 +422,36 @@ internal sealed class MainForm : Form
             "808 Radio", MessageBoxButtons.OK, MessageBoxIcon.Information)));
         m.Closed += (_, _) => _c.Settings.Save();
         return m;
+    }
+
+    private ArtPopup? _artPopup;
+
+    private static Image TestCard()
+    {
+        var bmp = new Bitmap(300, 300);
+        using var g = Graphics.FromImage(bmp);
+        using var b = new System.Drawing.Drawing2D.LinearGradientBrush(new Rectangle(0, 0, 300, 300), Color.DarkOrange, Color.MidnightBlue, 45f);
+        g.FillRectangle(b, 0, 0, 300, 300);
+        using var f = new Font("Segoe UI Semibold", 40);
+        g.DrawString("808", f, Brushes.White, 70, 110);
+        return bmp;
+    }
+
+    /// <summary>The display's album art / logo, popped out bigger, with what's playing under it.</summary>
+    private void ShowArt(Image art, Rectangle square)
+    {
+        _artPopup?.Close();
+        var eng = _c.Engine;
+        var hd = eng?.Hd;
+        string song = string.Join(" — ", new[] { hd?.Title, hd?.Artist }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        string station = string.Join("  ·  ", new[]
+        {
+            hd?.StationName, $"{_c.Frequency / 1e6:0.0} MHz" + (eng != null ? $" HD{eng.Program + 1}" : ""), hd?.Album,
+        }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        var lit = FaceplateView.Illuminations[Math.Clamp(_c.Settings.Illumination, 0, FaceplateView.Illuminations.Length - 1)].Color;
+        _artPopup = new ArtPopup(art, square, song.Length > 0 ? song : hd?.Slogan ?? "", station, lit) { TopMost = TopMost };
+        _artPopup.FormClosed += (_, _) => { _artPopup?.Dispose(); _artPopup = null; };
+        _artPopup.Show(this);
     }
 
     private void ShowMap(string which)

@@ -11,10 +11,15 @@
   draws the rest, the flip animation, and everything if Direct3D isn't available (then at up to 60 fps, paced off
   the display). Also fixed for all painting: WinForms allocated a new full-window back buffer on every paint (its
   default MaximumBuffer is 225 x 96), ~4 ms a frame at 4K.
-- The faceplate's spectrum analyzer (the art square, when there's no album art) runs at 60 fps instead of 10, with a
-  steady time-based fall; its frames repaint just that square (the rest of the faceplate stays at 10 Hz).
+- **Audio spectrum analyzer** on the faceplate, like an old head unit's: 16 bands from 40 Hz to 16 kHz of the audio
+  that's playing (tilted +3 dB/octave so music reads level), bars that rise instantly and fall steadily, and peak
+  ticks that hold and drop. It was a 16-band RF spectrum of the station's 744 kHz. 60 fps, repainting just its
+  square (the rest of the faceplate stays at 10 Hz). Blank while muted.
+- **Album art pops out:** click it on the display and it grows into a bigger picture with the song, artist and
+  station; a click, Esc or clicking the radio closes it. Right-click → *Album art on the display* turns the art off
+  so the analyzer is always there.
 - `808Radio.exe --bench <recordings> <seconds> <report> [width] [fps]`: paint timings with the panel open.
-  `R808_BENCH_CLOSED=1` times the faceplate instead.
+  `R808_BENCH_CLOSED=1` times the faceplate instead; `R808_BENCH_ART=1` pops out the art. Tools: `analyzer <wav>`.
 
 ## 0.2.0 (2026-10-01)
 

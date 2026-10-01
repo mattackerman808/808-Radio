@@ -44,7 +44,8 @@ internal static class Program
         var settings = AppSettings.Load();
         if (bench)
         {
-            settings.Muted = true;
+            settings.Muted = false;
+            settings.Volume = 0;   // silent but not muted: the faceplate analyzer goes blank when muted
             settings.FrequencyMhz = 97.3;
             if (args.Length > 5) settings.PanelFps = int.Parse(args[5]);   // optional frame rate setting (0 = display)
         }

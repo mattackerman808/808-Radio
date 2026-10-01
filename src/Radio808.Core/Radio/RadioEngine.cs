@@ -53,6 +53,7 @@ public sealed class RadioEngine : IDisposable
         {
             _blender.Process(a);
             TrackLevels(a);
+            CaptureAudio(a);
             _player.Write(a);
         };
         _rx.Mpx += CaptureMpx;
@@ -323,6 +324,41 @@ public sealed class RadioEngine : IDisposable
         float fall = (float)Math.Pow(0.1, n / FmReceiver.AudioRate / 1.5);
         _peakL = Math.Max(l, _peakL * fall);
         _peakR = Math.Max(r, _peakR * fall);
+    }
+
+    // ---- audio tap: the last few thousand samples of what's playing (mono), for the spectrum analyzer ----
+
+    private const int AudioTapSize = 8192;   // power of two, > any block an analyzer asks for
+    private readonly float[] _audioTap = new float[AudioTapSize];
+    private long _audioWritten;
+    private readonly object _audioLock = new();
+
+    private void CaptureAudio(ReadOnlySpan<float> stereo)
+    {
+        lock (_audioLock)
+        {
+            long w = _audioWritten;
+            for (int i = 0; i + 1 < stereo.Length; i += 2)
+                _audioTap[(int)(w++ & (AudioTapSize - 1))] = 0.5f * (stereo[i] + stereo[i + 1]);
+            _audioWritten = w;
+        }
+    }
+
+    /// <summary>
+    /// Copies the most recent <paramref name="dest"/>.Length audio samples (mono, at <see cref="FmReceiver.AudioRate"/>,
+    /// after the HD blend, before volume). Consecutive calls overlap, so an analyzer can run at any frame rate.
+    /// Returns false until that much audio has played.
+    /// </summary>
+    public bool TryGetLatestAudio(float[] dest)
+    {
+        int n = Math.Min(dest.Length, AudioTapSize);
+        lock (_audioLock)
+        {
+            if (_audioWritten < n) return false;
+            long start = _audioWritten - n;
+            for (int i = 0; i < n; i++) dest[i] = _audioTap[(int)((start + i) & (AudioTapSize - 1))];
+        }
+        return true;
     }
 
     /// <summary>Audio levels after the HD blend, before volume: RMS (VU-like) and decaying peaks, linear 0..1+.</summary>

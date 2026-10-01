@@ -3,12 +3,45 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
+using NAudio.Wave;
 using Radio808.Core.Devices;
 
 namespace Radio808.Tools;
 
 internal static class NetTools
 {
+    /// <summary>Band-level statistics of the faceplate's audio analyzer over a WAV file (to set its display range).</summary>
+    public static int AnalyzerStats(string wav)
+    {
+        using var file = new NAudio.Wave.WaveFileReader(wav);
+        var reader = file.ToSampleProvider();
+        int ch = reader.WaveFormat.Channels;
+        var an = new Radio808.Core.Dsp.AudioAnalyzer(16, reader.WaveFormat.SampleRate);
+        var samples = new List<float>();
+        var buf = new float[65536];
+        int got;
+        while ((got = reader.Read(buf.AsSpan())) > 0) for (int i = 0; i < got; i++) samples.Add(buf[i]);
+        var all = samples.ToArray();
+        int n = all.Length;
+        var mono = new float[n / ch];
+        for (int i = 0; i < mono.Length; i++) { float s = 0; for (int c = 0; c < ch; c++) s += all[i * ch + c]; mono[i] = s / ch; }
+        var per = Enumerable.Range(0, 16).Select(_ => new List<float>()).ToArray();
+        var db = new float[16];
+        for (int pos = 0; pos + Radio808.Core.Dsp.AudioAnalyzer.BlockSize <= mono.Length; pos += 1024)
+        {
+            an.Analyze(mono.AsSpan(pos, Radio808.Core.Dsp.AudioAnalyzer.BlockSize), db);
+            for (int b = 0; b < 16; b++) per[b].Add(db[b]);
+        }
+        Console.WriteLine($"{wav}: {reader.WaveFormat.SampleRate} Hz, {per[0].Count} blocks");
+        Console.WriteLine(" band        Hz     p10    p50    p90    max");
+        for (int b = 0; b < 16; b++)
+        {
+            var s = per[b].OrderBy(x => x).ToList();
+            Console.WriteLine($"  {b,2}  {an.Edges[b],6:0}-{an.Edges[b + 1],-6:0} {s[s.Count / 10],6:0.0} {s[s.Count / 2],6:0.0} {s[s.Count * 9 / 10],6:0.0} {s[^1],6:0.0}");
+        }
+        return 0;
+    }
+
     /// <summary>Lists rtl_tcp servers advertised on the local network (mDNS / DNS-SD).</summary>
     public static int Discover(double seconds)
     {

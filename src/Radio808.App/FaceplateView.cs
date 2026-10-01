@@ -75,8 +75,6 @@ internal sealed class FaceplateView : Control
     private byte[]? _artKey;
     private Image? _art;
 
-    private readonly Fft _fft = new(4096);
-    private readonly float[] _specIq = new float[8192], _re = new float[4096], _im = new float[4096], _db = new float[4096];
     private const int Bars = 16;
     private readonly float[] _bars = new float[Bars];
     private bool _specValid;
@@ -153,7 +151,7 @@ internal sealed class FaceplateView : Control
             if (FaceplateLive)
             {
                 // closed: the analyzer at the frame rate (the rest of the faceplate updates on the 100 ms tick)
-                PullSpectrum();
+                PullAudio();
                 if (_analyzerShown) { Invalidate(AnalyzerPixels); Update(); }
                 return;
             }
@@ -306,7 +304,7 @@ internal sealed class FaceplateView : Control
             else _slowDue = true;
             return;
         }
-        if (!_pacer.Running) PullSpectrum();   // (the pacer does it per frame while the faceplate is up)
+        if (!_pacer.Running) PullAudio();   // (the pacer does it per frame while the faceplate is up)
         if (_open) _nerd.Tick(_c.Engine);
         // marquee: hold 2 s at the start, then one character every 300 ms, a gap, and around again
         int len = _mainCols.Count / DotMatrix.CellCols;
@@ -323,34 +321,37 @@ internal sealed class FaceplateView : Control
         Invalidate();
     }
 
-    private void PullSpectrum()
+    /// <summary>
+    /// The faceplate's audio spectrum analyzer, like an old head unit's: 16 bands from 40 Hz to 16 kHz, from the audio
+    /// that's playing. Bars rise instantly and fall steadily; a peak tick holds above each bar, then drops.
+    /// </summary>
+    private void PullAudio()
     {
         var eng = _c.Engine;
         if (eng == null) { _specValid = false; return; }
-        if (!eng.TryGetSpectrumBlock(_specIq)) return;
-        _fft.PowerDb(_specIq, _re, _im, _db);
-        _nerd.AddBaseband(_db);
-        int per = 4096 / Bars;
-        var v = new float[Bars];
-        for (int b = 0; b < Bars; b++)
-        {
-            float sum = 0;
-            for (int k = 0; k < per; k++) sum += MathF.Pow(10, _db[b * per + k] / 10);
-            v[b] = 10 * MathF.Log10(sum / per);
-        }
-        float floor = v.Min();
-        // instant attack, steady fall (full height in 1.25 s), by time so it looks the same at any frame rate
-        double now = _barClock.Elapsed.TotalSeconds;
-        float fall = (float)(0.8 * Math.Clamp(now - _barsAt, 0, 0.25));
+        if (!eng.TryGetLatestAudio(_audioBlock)) return;
+        _analyzer ??= new AudioAnalyzer(Bars, FmReceiver.AudioRate);
+        _analyzer.Analyze(_audioBlock, _bandDb);
+        double now = _barClock.Elapsed.TotalSeconds, dt = Math.Clamp(now - _barsAt, 0, 0.25);
         _barsAt = now;
+        float fall = (float)(1.6 * dt), peakFall = (float)(1.0 * dt);
+        bool silent = _c.Settings.Muted;   // muted: nothing to show, like the real thing
         for (int b = 0; b < Bars; b++)
         {
-            float level = Math.Clamp((v[b] - floor) / 30f, 0, 1);
+            // -42 dB → empty, -6 dB → full: on broadcast music a bar typically sits about halfway and moves with the beat
+            // (measured over FM and HD recordings with `radio808-tools analyzer`)
+            float level = silent ? 0 : Math.Clamp((_bandDb[b] + 42) / 36f, 0, 1);
             _bars[b] = _specValid ? Math.Max(level, _bars[b] - fall) : level;
+            if (_bars[b] >= _peaks[b]) { _peaks[b] = _bars[b]; _peakHoldUntil[b] = now + 0.6; }
+            else if (now > _peakHoldUntil[b]) _peaks[b] = Math.Max(_bars[b], _peaks[b] - peakFall);
         }
         _specValid = true;
     }
 
+    private AudioAnalyzer? _analyzer;
+    private readonly float[] _audioBlock = new float[AudioAnalyzer.BlockSize], _bandDb = new float[Bars];
+    private readonly float[] _peaks = new float[Bars];
+    private readonly double[] _peakHoldUntil = new double[Bars];
     private readonly System.Diagnostics.Stopwatch _barClock = System.Diagnostics.Stopwatch.StartNew();
     private double _barsAt;
 
@@ -722,9 +723,9 @@ internal sealed class FaceplateView : Control
         else if (eng != null && synced && !playingHd && !_c.Settings.ForceAnalog && eng.Blender.RetryIn > 0.5)
             Indicator(g, x + 8, 172, $"HD IN {eng.Blender.RetryIn:0}S", true, false, lit);
 
-        // art square: album art / station logo, else a bar-graph spectrum
-        var sq = new RectangleF(800, 64, 104, 104);
-        Image? art = synced ? Decode(hd?.AlbumArt ?? hd?.StationLogo) : null;
+        // art square: album art / station logo (click to enlarge), else the audio spectrum analyzer
+        var sq = AnalyzerArea;
+        Image? art = synced && _c.Settings.ShowAlbumArt ? Decode(hd?.AlbumArt ?? hd?.StationLogo) : null;
         if (art != null)
         {
             var st = g.Save();
@@ -732,12 +733,29 @@ internal sealed class FaceplateView : Control
             float s = Math.Max(sq.Width / art.Width, sq.Height / art.Height);
             g.DrawImage(art, sq.X + (sq.Width - art.Width * s) / 2, sq.Y + (sq.Height - art.Height * s) / 2, art.Width * s, art.Height * s);
             g.Restore(st);
+            if (_hover == "art")
+                using (var pen = new Pen(Color.FromArgb(160, lit), 1.5f))
+                using (var p = Rounded(sq, 5)) g.DrawPath(pen, p);
+            _hits.Add(new Hit(sq, "art", () => ArtRequested?.Invoke(art, PointToScreen(DesignToClient(sq)))));
         }
         else DrawAnalyzer(g, lit);
         _analyzerShown = art == null;
     }
 
-    /// <summary>The display's art square: album art / station logo when HD has one, else this bar-graph spectrum.</summary>
+    /// <summary>The album art / logo was clicked: show it bigger, popping out of this screen rectangle.</summary>
+    public event Action<Image, Rectangle>? ArtRequested;
+
+    /// <summary>A design-coordinate rectangle in client pixels.</summary>
+    private Rectangle DesignToClient(RectangleF r) => Rectangle.FromLTRB(
+        (int)Math.Round(_ox + r.Left * _scale), (int)Math.Round(_oy + r.Top * _scale),
+        (int)Math.Round(_ox + r.Right * _scale), (int)Math.Round(_oy + r.Bottom * _scale));
+
+    private Rectangle PointToScreen(Rectangle r) => new(PointToScreen(r.Location), r.Size);
+
+    /// <summary>The art square on screen (where the art pops out from).</summary>
+    public Rectangle ArtSquareOnScreen => PointToScreen(DesignToClient(AnalyzerArea));
+
+    /// <summary>The display's art square: album art / station logo when HD has one, else the audio spectrum analyzer.</summary>
     private static readonly RectangleF AnalyzerArea = new(800, 64, 104, 104);
     private static readonly RectangleF Glass = new(272, 56, 640, 142);
     private bool _analyzerShown;
@@ -749,14 +767,15 @@ internal sealed class FaceplateView : Control
         float bw = sq.Width / Bars;
         int segs = 13;
         float sh = sq.Height / segs;
-        using var on1 = new SolidBrush(Color.FromArgb(255, lit));
-        using var on2 = new SolidBrush(Color.FromArgb(170, lit));
+        using var on = new SolidBrush(Color.FromArgb(220, lit));
+        using var peak = new SolidBrush(lit);
         using var off = new SolidBrush(ghost);
         for (int b = 0; b < Bars; b++)
         {
             int litSegs = _specValid ? (int)Math.Round(_bars[b] * segs) : 0;
+            int peakSeg = _specValid ? (int)Math.Round(_peaks[b] * segs) - 1 : -1;   // the held peak, above the bar
             for (int s = 0; s < segs; s++)
-                g.FillRectangle(s < litSegs ? (b is >= 5 and <= 10 ? on1 : on2) : off, sq.X + b * bw + 1, sq.Bottom - (s + 1) * sh + 1, bw - 2, sh - 2);
+                g.FillRectangle(s < litSegs ? on : s == peakSeg ? peak : off, sq.X + b * bw + 1, sq.Bottom - (s + 1) * sh + 1, bw - 2, sh - 2);
         }
     }
 

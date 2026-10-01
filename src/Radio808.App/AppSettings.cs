@@ -44,6 +44,8 @@ public sealed class AppSettings
     /// <summary>Display mode: 0 = now playing, 1 = station name, 2 = frequency.</summary>
     public int DisplayMode { get; set; }
     public bool AlwaysOnTop { get; set; }
+    /// <summary>Show HD album art / station logos on the display (off: the spectrum analyzer is always there).</summary>
+    public bool ShowAlbumArt { get; set; } = true;
     /// <summary>Instrument panel spectrum span: true = the dongle's full 1.49 MHz, false = the 744 kHz HD baseband.</summary>
     public bool PanelWideSpan { get; set; } = true;
     /// <summary>

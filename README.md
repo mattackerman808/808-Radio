@@ -128,6 +128,7 @@ settings untouched, beside a normal copy) and writes paint timings per section.
 | `play <MHz> [gain\|auto]` | the radio in a console, with live stats |
 | `selftest [CNR] [echo dB] [echo µs]` | synthetic stereo broadcast through the receiver |
 | `gainsweep`, `gaintest`, `ppmtest`, `ctlstress` | gain, frequency-correction and control-path tests |
+| `analyzer <wav>` | band levels of the faceplate's audio analyzer over a recording |
 | `discover`, `netlatency <host[:port]> [MHz]` | find rtl_tcp servers (mDNS); an rtl_tcp link's throughput, drops and command latency (`play` uses rtl_tcp when `R808_RTLTCP=host` is set) |
 
 ## Credits
