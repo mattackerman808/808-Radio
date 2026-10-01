@@ -70,6 +70,10 @@ internal sealed class FaceplateView : Control
     private string _mainText = "";
     private List<bool[]> _mainCols = new();
     private int _scrollChars, _scrollTicks;
+    // the small line's info, scrolled like the big line when it doesn't fit
+    private string? _subText;
+    private List<bool[]> _subCols = new();
+    private int _subScroll, _subTicks, _subCells = 10;
     private string? _flash;
     private DateTime _flashUntil;
 
@@ -307,18 +311,10 @@ internal sealed class FaceplateView : Control
         }
         if (!_pacer.Running) PullAudio();   // (the pacer does it per frame while the faceplate is up)
         if (_open) _nerd.Tick(_c.Engine);
-        // marquee: hold 2 s at the start, then one character every 300 ms, a gap, and around again
-        int len = _mainCols.Count / DotMatrix.CellCols;
-        if (len > MainCells)
-        {
-            _scrollTicks++;
-            int start = 20, every = 3;
-            if (_scrollTicks > start && (_scrollTicks - start) % every == 0)
-            {
-                _scrollChars++;
-                if (_scrollChars > len + 3) { _scrollChars = 0; _scrollTicks = 0; }
-            }
-        }
+        // marquees (big line and small line): hold 2 s at the start, then one character every 300 ms, a gap, and
+        // around again
+        Marquee(_mainCols.Count / DotMatrix.CellCols, MainCells, ref _scrollChars, ref _scrollTicks);
+        Marquee(_subCols.Count / DotMatrix.CellCols, _subCells, ref _subScroll, ref _subTicks);
         Invalidate();
     }
 
@@ -623,11 +619,23 @@ internal sealed class FaceplateView : Control
         Label(g, "HD CH", 10, lit, new RectangleF(142, 196, 52, 14), StringAlignment.Center, bold: true);   // next HD program
         Label(g, "DISP", 10, lit, new RectangleF(200, 196, 52, 14), StringAlignment.Center, bold: true);
         Key(g, new RectangleF(142, 212, 52, 22), "band", NextProgram);
-        Key(g, new RectangleF(200, 212, 52, 22), "disp", () =>
-        {
-            _c.Settings.DisplayMode = (_c.Settings.DisplayMode + 1) % 3;
-            Flash(_c.Settings.DisplayMode switch { 0 => "NOW PLAYING", 1 => "STATION", _ => "FREQUENCY" });
-        });
+        Key(g, new RectangleF(200, 212, 52, 22), "disp", SwapDisplay);
+    }
+
+    private static void Marquee(int len, int cells, ref int chars, ref int ticks)
+    {
+        if (len <= cells) { chars = ticks = 0; return; }
+        ticks++;
+        const int start = 20, every = 3;
+        if (ticks > start && (ticks - start) % every == 0 && ++chars > len + 3) chars = ticks = 0;
+    }
+
+    /// <summary>DISP: swap the song and the station info between the big line and the small one.</summary>
+    public void SwapDisplay()
+    {
+        _c.Settings.DisplayMode = SongOnTop ? 1 : 0;
+        _scrollChars = _scrollTicks = _subScroll = _subTicks = 0;
+        Invalidate();
     }
 
     public void NextProgram()
@@ -675,15 +683,25 @@ internal sealed class FaceplateView : Control
         DotMatrix.Draw(g, _mainCols, _scrollChars * DotMatrix.CellCols, 292, 76, 6.3f, MainCells, alert ? Alert : lit, ghost);
         if (eng == null && !_c.Starting) _hits.Add(new Hit(new RectangleF(284, 64, 500, 64), "start", () => _ = _c.StartAsync()));
 
-        // line 2: a full-width small dot-matrix line: band + frequency on the left ("HD2 107.7"), the clock on the right
-        // the band and frequency stay put ("FM 97.3"); the HD program is shown in the list after them
-        string left = $"{"FM",-4}{mhz,5}", clockText = DateTime.Now.ToString("H:mm").PadLeft(5);
-        var l2 = DotMatrix.Columns(left + new string(' ', Line2Cells - left.Length - clockText.Length) + clockText);
+        // line 2: a full-width small dot-matrix line: the info that isn't on the big line (station "KLLC 97.3", or the
+        // song: DISP swaps them), the station's HD programs, and the clock on the right
+        string clockText = DateTime.Now.ToString("H:mm").PadLeft(5);
+        var l2 = DotMatrix.Columns(new string(' ', Line2Cells - clockText.Length) + clockText);
         DotMatrix.Draw(g, l2, 0, 292, 136, 3.1f, Line2Cells, lit, ghost, glow: false);   // ends ~776, left of the art square
+        bool hdList = hd != null && synced && hd.Programs.Count > 0 && eng != null;
+        _subCells = hdList ? 10 : 20;   // up to the HD list, or to the clock
+        string sub = SubText(eng, hd, rds, synced, mhz);
+        if (sub != _subText)
+        {
+            _subText = sub;
+            _subCols = DotMatrix.Columns(sub);
+            _subScroll = _subTicks = 0;
+        }
+        DotMatrix.Draw(g, _subCols, _subScroll * DotMatrix.CellCols, 292, 136, 3.1f, _subCells, lit, ghost, glow: false);
         // the station's HD programs in the middle ("HD 1 2 3"): the one you're hearing fully lit; the one you've chosen
         // blinks while it locks in (switching programs, or HD coming back); the rest dimmer. All dimmer when HD is too
         // weak to play (WEAK says why). Click a number to switch.
-        if (hd != null && synced && hd.Programs.Count > 0 && eng != null)
+        if (hdList && hd != null && eng != null)
         {
             const float pitch = 3.1f, cellW = pitch * DotMatrix.CellCols;
             var dim = Color.FromArgb(110, lit);
@@ -808,19 +826,36 @@ internal sealed class FaceplateView : Control
         if (_c.Seeking) return $"SEEK  {mhz}";
         if (!string.IsNullOrEmpty(hd?.Alert)) { alert = true; return "ALERT  " + hd.Alert.ToUpperInvariant(); }
 
-        string? station = synced ? hd?.StationName : null;
-        station ??= rds?.ProgramService ?? rds?.CallSign;
+        var (song, station) = Info(hd, rds, synced, mhz);
+        return (SongOnTop ? song ?? station : station).ToUpperInvariant();
+    }
+
+    /// <summary>DISP swaps the song and the station info between the big and the small line.</summary>
+    private bool SongOnTop => _c.Settings.DisplayMode != 1;
+
+    /// <summary>The small line's info: whichever of song / station isn't on the big line.</summary>
+    private string SubText(RadioEngine? eng, HdStatus? hd, RdsStatus? rds, bool synced, string mhz)
+    {
+        if (eng == null) return $"FM {mhz}";
+        var (song, station) = Info(hd, rds, synced, mhz);
+        // no song info: the station's on the big line either way, so show its format here ("CLASSIC ROCK"), if any
+        string format = rds?.PtyName ?? "";
+        return (song == null ? format : SongOnTop ? station : song).ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// What's playing (HD title - artist, else RDS RadioText; null if neither), and the station: its HD name or RDS
+    /// name / call sign with the frequency ("KLLC 97.3"; just the name if it already has the frequency in it).
+    /// </summary>
+    private static (string? song, string station) Info(HdStatus? hd, RdsStatus? rds, bool synced, string mhz)
+    {
+        string? name = synced ? hd?.StationName : null;
+        name ??= rds?.ProgramService?.Trim() is { Length: > 0 } ps ? ps : rds?.CallSign;
+        string station = string.IsNullOrWhiteSpace(name) ? $"FM {mhz}" : name.Contains(mhz) ? name : $"{name} {mhz}";
         string? song = null;
         if (synced && hd?.Title != null) song = hd.Artist != null ? $"{hd.Title} - {hd.Artist}" : hd.Title;
         song ??= rds?.RadioText;
-
-        string t = _c.Settings.DisplayMode switch
-        {
-            0 => song ?? station ?? $"FM {mhz}",
-            1 => station ?? $"FM {mhz}",
-            _ => $"FM {mhz}",
-        };
-        return t.ToUpperInvariant();
+        return (string.IsNullOrWhiteSpace(song) ? null : song, station);
     }
 
     /// <summary>A small segment-style indicator: outlined when on, filled when active, ghosted when off.</summary>

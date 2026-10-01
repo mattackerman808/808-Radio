@@ -2,10 +2,11 @@
 
 ## Unreleased
 
-- **Display reworked like a real head unit's:** a large dot-matrix line; a full-width small one with the band and
-  frequency, the station's HD programs and the clock (`FM 97.3  HD 1 2 3  11:52`: the program you're hearing lit,
-  the one you've chosen blinking while it locks in, click one to switch); and a row of fixed status lights, each lit
-  or dark, nothing moving: **HD**, **WEAK** (red), the classic interlocking-rings stereo indicator, **RDS**, **SEEK**,
+- **Display reworked like a real head unit's:** a large dot-matrix line with the song; a full-width small one with
+  the station (`KLLC 97.3`), its HD programs and the clock (`KLLC 97.3  HD 1 2 3  11:52`: the program you're hearing
+  lit, the one you've chosen blinking while it locks in, click one to switch), where **DISP** now swaps the song and
+  the station between the two lines (both scroll when they don't fit); and a row of fixed status lights, each lit or
+  dark, nothing moving: **HD**, **WEAK** (red), the classic interlocking-rings stereo indicator, **RDS**, **SEEK**,
   **WX**, **TRAFFIC**. The HD1/HD2/… tags that came and went are gone, and the **BAND** key is renamed **HD CH**: it
   steps through the programs (`HD2/3 CLASSIC ROCK`). DGTL is folded into HD (filled: digital audio), the "HD IN 12S"
   countdown into WEAK, and the P1–P6 badge into the preset keys (the one you're on is outlined).

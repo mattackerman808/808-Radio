@@ -41,7 +41,7 @@ public sealed class AppSettings
     public List<Preset?> Presets { get; set; } = new();
     /// <summary>Index into the faceplate's illumination colors.</summary>
     public int Illumination { get; set; }
-    /// <summary>Display mode: 0 = now playing, 1 = station name, 2 = frequency.</summary>
+    /// <summary>Display: 1 = station info on the big line and the song on the small one; otherwise the reverse.</summary>
     public int DisplayMode { get; set; }
     public bool AlwaysOnTop { get; set; }
     /// <summary>Show HD album art / station logos on the display (off: the spectrum analyzer is always there).</summary>

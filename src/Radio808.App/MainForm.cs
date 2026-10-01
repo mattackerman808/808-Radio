@@ -234,8 +234,7 @@ internal sealed class MainForm : Form
             case Keys.O: _view.ToggleOpen(); return true;
             case Keys.C: _view.CycleColor(); return true;
             case Keys.D:
-                _c.Settings.DisplayMode = (_c.Settings.DisplayMode + 1) % 3;
-                _view.Flash(_c.Settings.DisplayMode switch { 0 => "NOW PLAYING", 1 => "STATION", _ => "FREQUENCY" });
+                _view.SwapDisplay();
                 return true;
             case >= Keys.D1 and <= Keys.D6:
                 int p = key - Keys.D1;
@@ -335,11 +334,11 @@ internal sealed class MainForm : Form
         }
         m.Items.Add(colors);
         var disp = new ToolStripMenuItem("Display");
-        string[] modes = { "Now playing", "Station name", "Frequency" };
+        string[] modes = { "Song on top, station below", "Station on top, song below" };
         for (int i = 0; i < modes.Length; i++)
         {
             int idx = i;
-            disp.DropDownItems.Add(new ToolStripMenuItem(modes[i], null, (_, _) => _c.Settings.DisplayMode = idx) { Checked = _c.Settings.DisplayMode == i });
+            disp.DropDownItems.Add(new ToolStripMenuItem(modes[i], null, (_, _) => { if ((_c.Settings.DisplayMode == 1) != (idx == 1)) _view.SwapDisplay(); }) { Checked = (_c.Settings.DisplayMode == 1) == (i == 1) });
         }
         m.Items.Add(disp);
         m.Items.Add(new ToolStripMenuItem(_view.IsOpen ? "Close faceplate" : "Open faceplate (signal details)", null, (_, _) => _view.ToggleOpen()));
