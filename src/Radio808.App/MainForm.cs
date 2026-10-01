@@ -69,6 +69,7 @@ internal sealed class MainForm : Form
         {
             _timer.Start();
             await _c.StartAsync();
+            if (Bench is var (secs, report, width)) await RunBench(secs, report, width);
         };
         FormClosing += (_, _) =>
         {
@@ -79,6 +80,20 @@ internal sealed class MainForm : Form
             _c.Settings.WindowBounds = new[] { r.X, r.Y, r.Width, h };
             _c.Dispose();
         };
+    }
+
+    /// <summary>Set by --bench: measure painting with the panel open for this long, write the report, exit.</summary>
+    public static (double seconds, string report, int width)? Bench;
+
+    private async System.Threading.Tasks.Task RunBench(double seconds, string report, int width)
+    {
+        if (width > 0) ClientSize = new Size(width, (int)Math.Round(width * DesignH / DesignW));
+        _view.ToggleOpen();
+        await System.Threading.Tasks.Task.Delay(3000);   // the flip, and the waterfall filling
+        _view.Timing.Reset();
+        await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(seconds));
+        System.IO.File.WriteAllText(report, $"window {ClientSize.Width} x {ClientSize.Height} px\n" + _view.Timing.Report(seconds));
+        Close();
     }
 
     // ---- frameless window: shape, move, resize with a locked aspect ratio ----

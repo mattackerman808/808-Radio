@@ -61,8 +61,12 @@ public sealed class AppSettings
         return s;
     }
 
+    /// <summary>Never write settings (the paint benchmark runs beside the user's own copy).</summary>
+    public static bool ReadOnly;
+
     public void Save()
     {
+        if (ReadOnly) return;
         try
         {
             Directory.CreateDirectory(Dir);

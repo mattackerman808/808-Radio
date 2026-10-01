@@ -4,6 +4,10 @@
 
 - Instrument panel: the network dongle's host and data rate share one **Source** line, so the statistics no
   longer run into the equalizer section; shorter Tuning and Gain lines (they were cut off).
+- Instrument panel runs at ~30 fps (was 10): the spectrum, waterfall, multiplex and meters update every frame, the
+  waterfall scrolls at 20 averaged rows a second, and painting a frame costs less than half as much (the chassis is
+  cached, and only the sections that changed are redrawn). Measured at 2600 px wide: 9 → 31 fps, 21 → 9 ms per frame.
+- `808Radio.exe --bench <recordings> <seconds> <report> [width]`: paint timings with the panel open.
 
 ## 0.2.0 (2026-10-01)
 

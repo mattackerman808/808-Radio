@@ -48,6 +48,11 @@ internal sealed class NerdPanel : IDisposable
         if (!Wide) AddRow(db);
     }
 
+    private const double RowSeconds = 0.05;   // waterfall: 20 rows a second
+    private readonly float[] _rowAcc = new float[SpecW];
+    private int _rowCount;
+    private DateTime _nextRow = DateTime.MinValue;
+
     private readonly Fft _devFft = new(4096);
     private readonly float[] _devIq = new float[8192], _devDb = new float[4096];
     private long _rowCenter;
@@ -58,16 +63,30 @@ internal sealed class NerdPanel : IDisposable
         if (DateTime.UtcNow < _ignoreRowsUntil) return;   // samples still in flight from the old frequency
         // each column covers its exact share of the bins (4096 / 592 isn't an integer; truncating it squeezed the
         // spectrum toward the left and put the signal ~100 kHz off its markers)
+        // The trace follows every spectrum (one per frame, ~30/s); the waterfall gets a row every RowSeconds, the average
+        // of the spectra since the last one (smoother than single spectra, and ~7 s of history in the 150 rows).
         var row = new float[SpecW];
         for (int c = 0; c < SpecW; c++)
         {
             int k0 = (int)((long)c * db.Length / SpecW), k1 = Math.Max(k0 + 1, (int)((long)(c + 1) * db.Length / SpecW));
             float sum = 0;
             for (int k = k0; k < k1; k++) sum += MathF.Pow(10, db[k] / 10);
-            row[c] = 10 * MathF.Log10(sum / (k1 - k0) + 1e-20f);
-            _spec[c] = _specValid ? _spec[c] + 0.4f * (row[c] - _spec[c]) : row[c];
+            float lin = sum / (k1 - k0);
+            _rowAcc[c] += lin;
+            row[c] = 10 * MathF.Log10(lin + 1e-20f);
+            _spec[c] = _specValid ? _spec[c] + 0.2f * (row[c] - _spec[c]) : row[c];
         }
         _specValid = true;
+        _rowCount++;
+        var now = DateTime.UtcNow;
+        if (now < _nextRow) return;
+        _nextRow = (now - _nextRow).TotalSeconds > RowSeconds ? now.AddSeconds(RowSeconds) : _nextRow.AddSeconds(RowSeconds);
+        for (int c = 0; c < SpecW; c++)
+        {
+            row[c] = 10 * MathF.Log10(_rowAcc[c] / _rowCount + 1e-20f);
+            _rowAcc[c] = 0;
+        }
+        _rowCount = 0;
         // waterfall scale tracks the noise floor and the peak slowly
         var sorted = (float[])row.Clone();
         Array.Sort(sorted);
@@ -105,8 +124,8 @@ internal sealed class NerdPanel : IDisposable
         return 0xFFFFFF;
     }
 
-    /// <summary>Pulls the MPX spectrum and samples the history (call at ~10 Hz).</summary>
-    public void Tick(RadioEngine? eng)
+    /// <summary>Pulls the wide spectrum and the MPX spectrum (call every frame, ~30 Hz).</summary>
+    public void FrameTick(RadioEngine? eng)
     {
         if (eng == null) return;
         if (Wide && eng.TryGetDeviceSpectrumBlock(_devIq))
@@ -124,10 +143,16 @@ internal sealed class NerdPanel : IDisposable
                 double f0 = c * 60_000.0 / SpecW, f1 = (c + 1) * 60_000.0 / SpecW;
                 float m = -200;
                 for (int k = (int)(f0 / binHz); k <= (int)(f1 / binHz); k++) m = Math.Max(m, _mpxDb[2048 + k]);
-                _mpx[c] = _mpxValid ? _mpx[c] + 0.35f * (m - _mpx[c]) : m;
+                _mpx[c] = _mpxValid ? _mpx[c] + 0.13f * (m - _mpx[c]) : m;   // ~ the old 0.35 at 10 Hz
             }
             _mpxValid = true;
         }
+    }
+
+    /// <summary>Equalizer taps and the history (call at ~10 Hz).</summary>
+    public void Tick(RadioEngine? eng)
+    {
+        if (eng == null) return;
         eng.Receiver.Equalizer.CopyTapMagnitudes(_taps);
 
         var now = DateTime.UtcNow;
@@ -158,16 +183,34 @@ internal sealed class NerdPanel : IDisposable
 
     // ------------------------------------------------------------------ drawing
 
-    public void Draw(Graphics g, RectangleF area, Color lit)
+    /// <summary>Sections redrawn every frame (spectrum + waterfall, multiplex, meters), in design coordinates.</summary>
+    public RectangleF[] FastRects { get; private set; } = Array.Empty<RectangleF>();
+    /// <summary>Sections whose data changes a few times a second (stats, taps, history).</summary>
+    public RectangleF[] SlowRects { get; private set; } = Array.Empty<RectangleF>();
+
+    public void Draw(Graphics g, RectangleF area, Color lit, PaintTiming timing)
     {
         var eng = _c.Engine;
-        float lx = area.X + 12, rx = area.X + 632;
-        DrawBaseband(g, lx, area.Y + 8, lit);
-        DrawMpx(g, lx, area.Y + 296, lit);
-        DrawMeters(g, lx, area.Y + 428, lit, eng);
-        DrawStats(g, rx, area.Y + 8, area.Right - rx - 12, lit, eng);
-        DrawTaps(g, rx, area.Y + 316, area.Right - rx - 12, lit, eng);
-        DrawHistory(g, rx, area.Y + 388, area.Right - rx - 12, lit);
+        float lx = area.X + 12, rx = area.X + 632, rw = area.Right - rx - 12;
+        RectangleF baseband = new(lx - 4, area.Y + 4, SpecW + 8, 292), mpx = new(lx - 4, area.Y + 292, SpecW + 8, 132),
+            meters = new(lx - 4, area.Y + 424, SpecW + 8, 66), stats = new(rx - 2, area.Y + 4, rw + 4, 308),
+            taps = new(rx - 2, area.Y + 312, rw + 4, 74), hist = new(rx - 2, area.Y + 384, rw + 4, area.Bottom - area.Y - 384);
+        FastRects = new[] { baseband, mpx, meters };
+        SlowRects = new[] { stats, taps, hist };
+        // a frame usually repaints only some sections: skip the others (GDI+ would still do most of their work)
+        long t = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (g.IsVisible(baseband)) DrawBaseband(g, lx, area.Y + 8, lit);
+        t = timing.Section("spectrum+wf", t);
+        if (g.IsVisible(mpx)) DrawMpx(g, lx, area.Y + 296, lit);
+        t = timing.Section("mpx", t);
+        if (g.IsVisible(meters)) DrawMeters(g, lx, area.Y + 428, lit, eng);
+        t = timing.Section("meters", t);
+        if (g.IsVisible(stats)) DrawStats(g, rx, area.Y + 8, rw, lit, eng);
+        t = timing.Section("stats", t);
+        if (g.IsVisible(taps)) DrawTaps(g, rx, area.Y + 316, rw, lit, eng);
+        t = timing.Section("taps", t);
+        if (g.IsVisible(hist)) DrawHistory(g, rx, area.Y + 388, rw, lit);
+        t = timing.Section("history", t);
     }
 
     private void DrawBaseband(Graphics g, float x, float y, Color lit)
@@ -223,7 +266,10 @@ internal sealed class NerdPanel : IDisposable
             for (int c = 0; c < SpecW; c++)
                 pts[c] = new PointF(sr.X + c, sr.Bottom - Math.Clamp((_spec[c] - lo) / (hi - lo), 0, 1) * (sr.Height - 4));
             var poly = new List<PointF>(pts) { new(sr.Right, sr.Bottom), new(sr.X, sr.Bottom) };
+            // the fill's edge is under the anti-aliased line, so it doesn't need anti-aliasing itself (much cheaper)
+            g.SmoothingMode = SmoothingMode.None;
             using (var fill = new LinearGradientBrush(sr, Color.FromArgb(110, lit), Color.FromArgb(10, lit), 90f)) g.FillPolygon(fill, poly.ToArray());
+            g.SmoothingMode = SmoothingMode.AntiAlias;
             using (var pen = new Pen(lit, 1.2f)) g.DrawLines(pen, pts);
         }
         // waterfall: newest row at the top

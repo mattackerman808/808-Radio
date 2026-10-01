@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.IO;
 using System.Linq;
@@ -100,8 +101,19 @@ internal sealed class FaceplateView : Control
             var screen = new Point((short)((long)m.LParam & 0xFFFF), (short)(((long)m.LParam >> 16) & 0xFFFF));
             if (IsResizeBorder(PointToClient(screen))) { m.Result = HTTRANSPARENT; return; }   // let the form resize
         }
+        if (m.Msg == 0x000F)   // WM_PAINT: time the whole frame, including the double buffer's copy to the screen
+        {
+            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+            base.WndProc(ref m);
+            Timing.Frame(t0);
+            return;
+        }
         base.WndProc(ref m);
     }
+
+    /// <summary>Paint timings (reported by --bench).</summary>
+    public PaintTiming Timing { get; } = new();
+    private long _secT;
 
     public FaceplateView(RadioController c)
     {
@@ -118,8 +130,16 @@ internal sealed class FaceplateView : Control
         _nerd = new NerdPanel(c);
         _fastPaint.Tick += (_, _) =>
         {
-            Invalidate();
+            if (PanelLive) InvalidateDesign(_nerd.FastRects); else Invalidate();
             if (!_nerd.Animating) _fastPaint.Stop();
+        };
+        // the instrument panel's moving parts, at ~30 fps while it's open
+        _frameTimer.Tick += (_, _) =>
+        {
+            if (!PanelLive) { _frameTimer.Stop(); return; }
+            PullSpectrum();
+            _nerd.FrameTick(_c.Engine);
+            InvalidateDesign(_nerd.FastRects);
         };
         // any retune (keys, presets, seek) slides the open spectrum too
         c.Changed += () => { if (_open) _fastPaint.Start(); };
@@ -130,7 +150,13 @@ internal sealed class FaceplateView : Control
             if (_open && _anim >= 1 || !_open && _anim <= 0)
             {
                 _animTimer.Stop();
-                if (!_open) OpenLayout?.Invoke(false);   // fully folded back up: shrink the window
+                if (_open) _frameTimer.Start();
+                else
+                {
+                    OpenLayout?.Invoke(false);   // fully folded back up: shrink the window
+                    _chassisBg?.Dispose();
+                    _chassisBg = null;
+                }
             }
             Invalidate();
         };
@@ -143,6 +169,20 @@ internal sealed class FaceplateView : Control
         _open = !_open;
         if (_open) OpenLayout?.Invoke(true);   // grow the window first, then fold the faceplate down
         _animTimer.Start();
+    }
+
+    private readonly Timer _frameTimer = new() { Interval = 33 };
+
+    /// <summary>The panel is fully open (not mid-flip).</summary>
+    private bool PanelLive => _open && _anim >= 1;
+
+    /// <summary>Invalidates design-coordinate rectangles (a pixel of margin for anti-aliasing).</summary>
+    private void InvalidateDesign(RectangleF[] rects)
+    {
+        if (_scale <= 0) { Invalidate(); return; }
+        foreach (var r in rects)
+            Invalidate(Rectangle.FromLTRB((int)Math.Floor(_ox + r.Left * _scale) - 2, (int)Math.Floor(_oy + r.Top * _scale) - 2,
+                (int)Math.Ceiling(_ox + r.Right * _scale) + 2, (int)Math.Ceiling(_oy + r.Bottom * _scale) + 2));
     }
 
     private Color Lit => Illuminations[Math.Clamp(_c.Settings.Illumination, 0, Illuminations.Length - 1)].Color;
@@ -159,6 +199,13 @@ internal sealed class FaceplateView : Control
 
     public void Tick()
     {
+        if (PanelLive)
+        {
+            // the frame timer handles the spectrum; here just the slower sections (the faceplate is folded away)
+            _nerd.Tick(_c.Engine);
+            InvalidateDesign(_nerd.SlowRects);
+            return;
+        }
         PullSpectrum();
         if (_open) _nerd.Tick(_c.Engine);
         // marquee: hold 2 s at the start, then one character every 300 ms, a gap, and around again
@@ -205,11 +252,20 @@ internal sealed class FaceplateView : Control
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        g.Clear(Color.FromArgb(0x05, 0x06, 0x07));
+        _secT = System.Diagnostics.Stopwatch.GetTimestamp();
         _scale = Math.Min(Width / W, Height / H);
-        if (_scale <= 0) return;
+        if (_scale <= 0) { g.Clear(Background); return; }
         _ox = (Width - W * _scale) / 2;
         _oy = (Height - H * _scale) / 2;
+        // open: the chassis behind the panel never changes, so it's drawn once per window size and copied after that
+        if (H > ClosedH)
+        {
+            g.CompositingMode = CompositingMode.SourceCopy;
+            g.DrawImageUnscaled(ChassisBackground(), 0, 0);
+            g.CompositingMode = CompositingMode.SourceOver;
+        }
+        else g.Clear(Background);
+        _secT = Timing.Section("background", _secT);
         g.TranslateTransform(_ox, _oy);
         g.ScaleTransform(_scale, _scale);
         g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -220,6 +276,7 @@ internal sealed class FaceplateView : Control
         if (H > ClosedH)
         {
             DrawChassis(g);
+            _secT = Timing.Section("lip", _secT);
             if (_anim < 1)
             {
                 // the faceplate folding down: it slides to the hinge at the bottom and flattens toward edge-on
@@ -249,10 +306,26 @@ internal sealed class FaceplateView : Control
         DrawRightSide(g);
     }
 
-    /// <summary>Open: the chassis behind the faceplate, with the instrument panel and the folded faceplate's lip.</summary>
-    private void DrawChassis(Graphics g)
+    private static readonly Color Background = Color.FromArgb(0x05, 0x06, 0x07);
+    private Bitmap? _chassisBg;
+
+    /// <summary>The window's background with the faceplate open (chassis, screws, the panel's frame), at this size.</summary>
+    private Bitmap ChassisBackground()
     {
-        var lit = Lit;
+        if (_chassisBg != null && _chassisBg.Width == Width && _chassisBg.Height == Height) return _chassisBg;
+        _chassisBg?.Dispose();
+        _chassisBg = new Bitmap(Width, Height, PixelFormat.Format32bppPArgb);   // the format GDI+ copies fastest
+        using var g = Graphics.FromImage(_chassisBg);
+        g.Clear(Background);
+        g.TranslateTransform(_ox, _oy);
+        g.ScaleTransform(_scale, _scale);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        DrawChassisBackground(g);
+        return _chassisBg;
+    }
+
+    private static void DrawChassisBackground(Graphics g)
+    {
         var outer = new RectangleF(12, 14, 976, 546);
         using (var p = Rounded(outer, OutlineRadius))
         {
@@ -275,7 +348,17 @@ internal sealed class FaceplateView : Control
             using var pen = new Pen(Color.FromArgb(0x22, 0x28, 0x2F), 1.5f);
             g.DrawPath(pen, p);
         }
-        if (_anim > 0.6f) _nerd.Draw(g, panel, lit);
+    }
+
+    private static readonly RectangleF PanelArea = new(44, 26, 912, 490);
+
+    /// <summary>Open: the instrument panel and the folded faceplate's lip, over the cached chassis.</summary>
+    private void DrawChassis(Graphics g)
+    {
+        var lit = Lit;
+        var panel = PanelArea;
+        if (_anim > 0.6f) _nerd.Draw(g, panel, lit, Timing);
+        _secT = System.Diagnostics.Stopwatch.GetTimestamp();
         if (_anim >= 1)
         {
             _hits.Add(new Hit(_nerd.TuneArea, "tune", null));   // click = tune (handled in OnMouseUp, needs the x)
@@ -786,7 +869,7 @@ internal sealed class FaceplateView : Control
         if (_hoverHiddenAt is Point hp && Math.Abs(e.X - hp.X) + Math.Abs(e.Y - hp.Y) < 4) return;   // not moved since the click
         _hoverHiddenAt = null;
         float? hx = h == "tune" ? p.X : null;
-        if (hx != _nerd.HoverX) { _nerd.HoverX = hx; Invalidate(); }
+        if (hx != _nerd.HoverX) { _nerd.HoverX = hx; if (PanelLive) InvalidateDesign(_nerd.FastRects); else Invalidate(); }
         if (h != _hover)
         {
             _hover = h;
