@@ -703,7 +703,8 @@ internal sealed class FaceplateView : Control
             {
                 uint prog = p;
                 bool sel = eng != null && p == eng.Program;
-                float nx = Indicator(g, x, 172, $"HD{p + 1}", true, sel, lit);
+                // lit only while HD is what you hear; found-but-not-playing (weak, analog only, retrying) stays dim
+                float nx = Indicator(g, x, 172, $"HD{p + 1}", playingHd, sel && playingHd, lit);
                 _hits.Add(new Hit(new RectangleF(x - 2, 168, nx - x, 22), "prog" + p, () => { _c.SetProgram(prog); Flash($"HD{prog + 1}"); }));
                 x = nx;
             }
