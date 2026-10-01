@@ -13,7 +13,15 @@
     <Product>808 Radio</Product>
     <Version>0.1.0</Version>
     <Copyright>GPL-3.0-or-later</Copyright>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- release builds: self-contained for win-x64 (no .NET install needed) -->
+    <RuntimeIdentifier Condition="'$(Configuration)' == 'Release'">win-x64</RuntimeIdentifier>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="app.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Radio808.Core\Radio808.Core.csproj" />

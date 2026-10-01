@@ -108,6 +108,14 @@ internal sealed class MainForm : Form
     protected override void OnLoad(EventArgs e)
     {
         base.OnLoad(e);
+        if (_c.Settings.WindowBounds == null)
+        {
+            // first run: 1000 design px at the display's scale, at most 70% of the screen width, centered
+            var area = Screen.FromControl(this).WorkingArea;
+            int w = (int)Math.Min(1000 * DeviceDpi / 96.0, area.Width * 0.7);
+            ClientSize = new Size(w, ClientSize.Height);
+            Location = new Point(area.X + (area.Width - w) / 2, area.Y + (area.Height - (int)(w * DesignH / DesignW)) / 2);
+        }
         ClientSize = new Size(ClientSize.Width, (int)Math.Round(ClientSize.Width * DesignH / DesignW));   // exact faceplate shape
         UpdateShape();
     }
