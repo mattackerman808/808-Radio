@@ -101,6 +101,41 @@ internal static class FmTools
         return 0;
     }
 
+    /// <summary>
+    /// Steps through every US FM channel and prints the equalizer's envelope ripple (the seek metric), pilot lock and
+    /// RDS sync, to calibrate seek. Gain "auto" = tuner AGC.
+    /// </summary>
+    public static int RippleScan(double? gainDb)
+    {
+        using var dev = Program.Open(87.9);
+        dev.Gain = gainDb;
+        var rx = new FmReceiver();
+        volatile_skip = 0;
+        dev.Samples += iq =>
+        {
+            if (volatile_skip > 0) { volatile_skip--; return; }
+            rx.Process(iq);
+        };
+        dev.Start();
+        Console.WriteLine($"gain {(gainDb is null ? "auto" : gainDb + " dB")}:  MHz  ripple  ch dBFS  pilot  RDS");
+        for (int khz = 87_900; khz <= 107_900; khz += 200)
+        {
+            dev.Frequency = khz * 1000L;
+            volatile_skip = 8;
+            Thread.Sleep(200);
+            rx.Reset();
+            Thread.Sleep(150);
+            rx.Equalizer.TakeEnvelopeRipple();
+            Thread.Sleep(200);
+            double r = rx.Equalizer.TakeEnvelopeRipple();
+            var st = rx.Stereo;
+            Console.WriteLine($"{khz / 1000.0,20:F1}  {r,6:F3}  {rx.ChannelPowerDb,6:F1}  {(st.PilotLocked ? "lock" : "    ")}  {(rx.Rds.Synced ? "sync" : "")} {rx.Rds.CallSign}  {new string('#', (int)Math.Max(0, (1.1 - r) * 30))}");
+        }
+        dev.Stop();
+        return 0;
+    }
+    private static volatile int volatile_skip;
+
     /// <summary>Plays a station live through the default audio device.</summary>
     public static int Play(double mhz, double gainDb, double seconds)
     {

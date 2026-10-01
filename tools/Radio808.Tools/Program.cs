@@ -26,6 +26,7 @@ internal static class Program
                 case "fm": return FmTools.Offline(args[1], args[2], args.Length > 3 ? int.Parse(args[3]) : 48_000);
                 case "snr": return AudioCompare.Snr(args[1], args[2]);
                 case "gaintest": return FmTools.GainTest(Mhz(args, 1, 97.3));
+                case "ripplescan": return FmTools.RippleScan(args.Length > 1 && args[1] != "auto" ? double.Parse(args[1]) : null);
                 case "selftest": return SelfTest.Run(args.Length > 1 ? double.Parse(args[1]) : 999,
                     args.Length > 2 ? double.Parse(args[2]) : 0, args.Length > 3 ? double.Parse(args[3]) : 0);
                 case "compare": return AudioCompare.Run(args[1..]);

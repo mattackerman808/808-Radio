@@ -16,8 +16,10 @@ public delegate void IqHandler(ReadOnlySpan<float> iq);
 /// <summary>
 /// An RTL-SDR dongle streaming complex samples. Samples arrive on a dedicated thread via <see cref="Samples"/>.
 /// </summary>
-public sealed unsafe class RtlSdrDevice : IDisposable
+public sealed unsafe class RtlSdrDevice : IIqSource
 {
+    public string Name => Info.ToString();
+
     private const uint BufferBytes = 64 * 1024;   // ~22 ms at 1.488 MS/s
     private const uint BufferCount = 15;
 

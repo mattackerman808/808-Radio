@@ -16,3 +16,6 @@ obj/
 .vs/
 .vscode/
 *.user
+
+# Local recordings, screenshots and scratch output
+/testdata/
