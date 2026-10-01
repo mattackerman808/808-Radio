@@ -23,8 +23,11 @@ internal static class Program
                 case "capture": return Capture(Mhz(args, 1, 97.3), double.Parse(args[2]), args[3], args.Length > 4 ? double.Parse(args[4]) : null);
                 case "spectrum": return Spectrum(args[1]);
                 case "scan": return Scan(args.Length > 1 ? double.Parse(args[1]) : double.NaN);
+                case "fm": return FmTools.Offline(args[1], args[2]);
+                case "play": return FmTools.Play(Mhz(args, 1, 97.3), args.Length > 2 ? double.Parse(args[2]) : 16.6, args.Length > 3 ? double.Parse(args[3]) : 0);
                 default:
-                    Console.WriteLine("usage: tools devices | probe <MHz> [seconds] | capture <MHz> <seconds> <out.cu8>");
+                    Console.WriteLine("usage: tools devices | probe <MHz> [s] | capture <MHz> <s> <out.cu8> [gain] | spectrum <in.cu8> | scan [gain]");
+                    Console.WriteLine("             fm <in.cu8> <out.wav> | play <MHz> [gain] [seconds, 0 = until Enter]");
                     return 2;
             }
         }
@@ -41,7 +44,7 @@ internal static class Program
         return 0;
     }
 
-    private static RtlSdrDevice Open(double mhz)
+    internal static RtlSdrDevice Open(double mhz)
     {
         var list = RtlSdrDevice.Enumerate();
         if (list.Count == 0) throw new InvalidOperationException("No RTL-SDR found.");
