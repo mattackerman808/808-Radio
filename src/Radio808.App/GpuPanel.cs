@@ -14,6 +14,7 @@ using Vortice.Mathematics;
 using Color = System.Drawing.Color;
 using Size = System.Drawing.Size;
 using FeatureLevel = Vortice.Direct3D.FeatureLevel;
+using Radio808.Shared;
 
 namespace Radio808.App;
 

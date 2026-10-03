@@ -10,6 +10,7 @@ using System.Windows.Forms;
 using Radio808.Core.Dsp;
 using Radio808.Core.Hd;
 using Radio808.Core.Radio;
+using Radio808.Shared;
 
 namespace Radio808.App;
 

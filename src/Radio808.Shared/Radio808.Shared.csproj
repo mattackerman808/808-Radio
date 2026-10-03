@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- What every 808 Radio shell shares (Windows Forms today, Avalonia on macOS): the controller that owns the engine,
+       the settings file and the log. No UI framework here. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Radio808.Shared</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Radio808.Core\Radio808.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
-namespace Radio808.App;
+namespace Radio808.Shared;
 
 public sealed class Preset
 {
@@ -11,7 +11,7 @@ public sealed class Preset
     public string? Name { get; set; }
 }
 
-/// <summary>User settings, saved as JSON in %APPDATA%\808Radio\settings.json.</summary>
+/// <summary>User settings, saved as JSON in <see cref="Dir"/>/settings.json.</summary>
 public sealed class AppSettings
 {
     public const int PresetCount = 6;
@@ -56,7 +56,10 @@ public sealed class AppSettings
     public static readonly int[] PanelFpsChoices = { 0, 120, 60, 30 };
     public int[]? WindowBounds { get; set; }
 
-    private static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "808Radio");
+    /// <summary>%APPDATA%\808Radio on Windows, ~/Library/Application Support/808Radio on macOS, ~/.config/808Radio elsewhere.</summary>
+    public static string Dir => OperatingSystem.IsMacOS()
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Application Support", "808Radio")
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "808Radio");
     private static string FilePath => Path.Combine(Dir, "settings.json");
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 

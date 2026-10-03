@@ -1,14 +1,13 @@
 using System;
 using System.IO;
 
-namespace Radio808.App;
+namespace Radio808.Shared;
 
-/// <summary>Appends errors to %APPDATA%\808Radio\808Radio.log (kept under ~1 MB).</summary>
-internal static class AppLog
+/// <summary>Appends errors to 808Radio.log in the settings folder (kept under ~1 MB).</summary>
+public static class AppLog
 {
     private static readonly object Lock = new();
-    public static string FilePath { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "808Radio", "808Radio.log");
+    public static string FilePath { get; } = Path.Combine(AppSettings.Dir, "808Radio.log");
 
     public static void Write(Exception ex) => Write(ex.ToString());
 

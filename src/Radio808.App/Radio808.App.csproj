@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Radio808.Core\Radio808.Core.csproj" />
+    <ProjectReference Include="..\Radio808.Shared\Radio808.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Radio808.Core.Devices;
 using Radio808.Core.Radio;
 
-namespace Radio808.App;
+namespace Radio808.Shared;
 
 /// <summary>
 /// Owns the radio engine and the settings; everything the UI does goes through here. UI thread only.
@@ -68,6 +68,7 @@ public sealed class RadioController : IDisposable
         }
         catch (Exception ex)
         {
+            AppLog.Write($"start ({(Networked ? "network " + Settings.RtlTcpAddress : "USB")}): {ex.GetType().Name}: {ex.Message}");
             Error = Friendly(ex);
             if (Networked) { Error += " Retrying…"; RetryLater(); }
             else if (ReplayDirectory == null && ex.Message.Contains("No RTL-SDR")) noUsbDongle = true;

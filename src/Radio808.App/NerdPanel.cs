@@ -5,6 +5,7 @@ using System.Drawing.Drawing2D;
 using System.Linq;
 using Radio808.Core.Dsp;
 using Radio808.Core.Radio;
+using Radio808.Shared;
 
 namespace Radio808.App;
 
