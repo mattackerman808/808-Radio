@@ -229,6 +229,8 @@ internal static class HdTools
                 }
             }) { IsBackground = true }.Start();
         var sw = Stopwatch.StartNew();
+        byte[]? savedWx = null;
+        var savedTrf = new byte[]?[9];
         // R808_TOUR="98.5,92.3": unattended test, retunes through the list every 10 s
         var tour = Environment.GetEnvironmentVariable("R808_TOUR")?.Split(',');
         int tourIdx = 0;
@@ -239,17 +241,38 @@ internal static class HdTools
             wake.WaitOne(2000);
             if (quit.IsSet) break;
             var s = radio.Hd; var b = radio.Blender; var st = radio.Receiver.Stereo;
+            // R808_SAVE_DIR=<folder>: save the weather image and traffic tiles as they arrive (with their map corners)
+            if (Environment.GetEnvironmentVariable("R808_SAVE_DIR") is { Length: > 0 } saveDir)
+            {
+                Directory.CreateDirectory(saveDir);
+                if (s.WeatherMap != null && !ReferenceEquals(s.WeatherMap, savedWx))
+                {
+                    savedWx = s.WeatherMap;
+                    File.WriteAllBytes(Path.Combine(saveDir, "weather.png"), s.WeatherMap);
+                    File.WriteAllText(Path.Combine(saveDir, "weather.txt"), $"{s.WeatherBounds}");
+                }
+                for (int t = 0; t < 9; t++)
+                    if (s.TrafficTiles[t] is { } tile && !ReferenceEquals(tile, savedTrf[t]))
+                    {
+                        savedTrf[t] = tile;
+                        File.WriteAllBytes(Path.Combine(saveDir, $"traffic{t}.png"), tile);
+                        File.WriteAllText(Path.Combine(saveDir, "traffic.txt"), $"{s.TrafficBounds}");
+                    }
+            }
             string programs = string.Join(",", System.Linq.Enumerable.Select(s.Programs.Keys, p => p == radio.Program ? $"[HD{p + 1}]" : $"HD{p + 1}"));
             var opt = radio.GainOptimizer;
             Console.Write($"[gain {radio.CurrentGainDb,4:F1}{(radio.AutoGain ? $" {opt.State,-9} {opt.Metric,-9} {opt.LastScore,5:F1}" : " fixed")} clip {opt.Clipping * 100,5:F2}%] ");
             Console.WriteLine($"{sw.Elapsed.TotalSeconds,4:F0}s {radio.Frequency / 1e6,5:F1} " +
                 $"{(b.PlayingHd ? "HD    " : radio.ForceAnalog ? "ANALOG" : "analog")} " +
-                $"{(s.Synced ? $"MER {(s.MerLower + s.MerUpper) / 2,4:F1}" : "no HD   ")} {programs,-24} " +
+                $"{(s.Synced ? $"MER {s.MerLower,4:F1}/{s.MerUpper,4:F1} BER {s.BerAvg:0.0000}" : "no HD                     ")} {programs,-24} " +
                 $"lead {b.HdLeadSeconds,5:F2} " + (b.RetryIn > 0 ? $"retry {b.RetryIn:F0}s " : "") +
                 $"| pilot {st.PilotSnrDb,4:F1} blend {st.Blend:F2}{(radio.Equalizer ? "" : " EQoff")}{(radio.ForceMono ? " MONO" : "")} " +
                 (s.StationName != null ? $"| {s.StationName} {s.Title}{(s.Artist != null ? " - " + s.Artist : "")}"
                     : $"| RDS {radio.Receiver.Rds.CallSign} [{radio.Receiver.Rds.ProgramService}] {radio.Receiver.Rds.RadioText}") +
                 (radio.HdDecoder.DroppedBlocks > 0 ? $" | dropped {radio.HdDecoder.DroppedBlocks}" : "") +
+                $" | files {s.FilesReceived}{(s.LastFile != null ? " " + s.LastFile : "")}{(s.AlbumArt != null ? " ART" : "")}{(s.StationLogo != null ? " LOGO" : "")}" +
+                (s.WeatherBounds is { } wb ? $" | WX N{wb.North:0.000} W{wb.West:0.000} S{wb.South:0.000} E{wb.East:0.000}" : "") +
+                (s.TrafficBounds is { } tb ? $" | TRF N{tb.North:0.000} W{tb.West:0.000} S{tb.South:0.000} E{tb.East:0.000} tiles {System.Linq.Enumerable.Count(s.TrafficTiles, t => t != null)}" : "") +
                 (radio.Device.LinkStatus is string link ? $" | link {link}" : ""));
         }
         if (stopped != null) Console.WriteLine(stopped);

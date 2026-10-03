@@ -8,6 +8,9 @@ using Radio808.Core.Native;
 
 namespace Radio808.Core.Hd;
 
+/// <summary>A map image's extent: the north-west corner (<see cref="North"/>, <see cref="West"/>) and the south-east corner.</summary>
+public readonly record struct MapBounds(double North, double West, double South, double East);
+
 /// <summary>Snapshot of the HD station state. Replaced wholesale (copy-on-write), so readers never lock.</summary>
 public sealed class HdStatus
 {
@@ -22,6 +25,14 @@ public sealed class HdStatus
     public byte[]? AlbumArt, StationLogo, WeatherMap;
     public DateTime WeatherTime, TrafficTime;
     public byte[]?[] TrafficTiles = new byte[]?[9];   // row-major 3x3
+    /// <summary>Where the weather image goes on a map: the latitude/longitude of its north-west and south-east corners.</summary>
+    public MapBounds? WeatherBounds;
+    /// <summary>The traffic mosaic's corners (the whole 3x3), from the last tile received.</summary>
+    public MapBounds? TrafficBounds;
+    /// <summary>The last HERE image's header, for the record: name, part numbers, corners.</summary>
+    public string? LastHereInfo;
+    /// <summary>The file name each traffic tile came with (same order as <see cref="TrafficTiles"/>).</summary>
+    public string?[] TrafficNames = new string?[9];
     /// <summary>Audio programs seen (0 = HD1), with their program type name.</summary>
     public SortedDictionary<uint, string?> Programs = new();
     public DateTime LastAudio = DateTime.MinValue;
@@ -386,7 +397,10 @@ public sealed unsafe class HdDecoder : IDisposable
     private void OnHereImage(IntPtr e)
     {
         int type = Nrsc5Native.I32(e, 8);
-        int n1 = Nrsc5Native.I32(e, 16);
+        int seq = Nrsc5Native.I32(e, 12);
+        int n1 = Nrsc5Native.I32(e, 16), n2 = Nrsc5Native.I32(e, 20);
+        // the image's map corners: latitude1/longitude1 = north/west edges, latitude2/longitude2 = south/east
+        var bounds = new MapBounds(Nrsc5Native.F32(e, 32), Nrsc5Native.F32(e, 36), Nrsc5Native.F32(e, 40), Nrsc5Native.F32(e, 44));
         string name = Nrsc5Native.Str(e, 48) ?? "";
         uint size = Nrsc5Native.U32(e, 56);
         var data = Nrsc5Native.Ptr(e, 64);
@@ -394,25 +408,42 @@ public sealed unsafe class HdDecoder : IDisposable
 
         var bytes = new byte[size];
         Marshal.Copy(data, bytes, 0, (int)size);
+        string info = $"{name} type {type} seq {seq} part {n1}/{n2} {size} bytes N{bounds.North:0.0000} W{bounds.West:0.0000} S{bounds.South:0.0000} E{bounds.East:0.0000}";
+        Update(s => s.LastHereInfo = info);
 
         if (type == Nrsc5Native.HereImageWeather)
         {
-            Update(s => { s.WeatherMap = bytes; s.WeatherTime = DateTime.Now; s.FilesReceived++; s.LastFile = name; });
+            Update(s => { s.WeatherMap = bytes; s.WeatherBounds = bounds; s.WeatherTime = DateTime.Now; s.FilesReceived++; s.LastFile = name; });
         }
         else if (type == Nrsc5Native.HereImageTraffic)
         {
-            // Tiles are named like "trafficMap_<row>_<col>_rdhs.png" (1-based); fall back to n1 order.
-            int idx = n1 - 1;
+            // The 3x3 mosaic's tiles come as parts 1-9 in row-major order from the north-west corner, named
+            // "trafficMap_<row>_<col>_<hash>.png" with 0-based row and column (KOIT 96.5, 2026-10-02). The part
+            // number is the reliable index; the name is a fallback (0- or 1-based).
+            int idx = n1 is >= 1 and <= 9 ? n1 - 1 : -1;
             var parts = name.Split('_');
-            if (parts.Length >= 3 && int.TryParse(parts[1], out int row) && int.TryParse(parts[2], out int col)
-                && row is >= 1 and <= 3 && col is >= 1 and <= 3)
-                idx = (row - 1) * 3 + (col - 1);
-            if (idx < 0 || idx > 8) return;
+            if (idx < 0 && parts.Length >= 3 && int.TryParse(parts[1], out int row) && int.TryParse(parts[2], out int col))
+            {
+                if (row is >= 0 and <= 2 && col is >= 0 and <= 2) idx = row * 3 + col;
+                else if (row is >= 1 and <= 3 && col is >= 1 and <= 3) idx = (row - 1) * 3 + (col - 1);
+            }
+            if (idx < 0) return;
+            // The corners the header gives for tile (a, b) are the center tile's box grown by a tiles north and
+            // south and b tiles east and west (not the tile's own extent), so the whole mosaic is the center tile
+            // plus one tile each way, whichever part this is.
+            int a = idx / 3, b = idx % 3;
+            double latC = (bounds.North + bounds.South) / 2, lonC = (bounds.West + bounds.East) / 2;
+            double latHalf = (bounds.North - bounds.South) / (2 * (2 * a + 1)) * 3, lonHalf = (bounds.East - bounds.West) / (2 * (2 * b + 1)) * 3;
+            var mosaic = new MapBounds(latC + latHalf, lonC - lonHalf, latC - latHalf, lonC + lonHalf);
             Update(s =>
             {
                 var tiles = (byte[]?[])s.TrafficTiles.Clone();
                 tiles[idx] = bytes;
                 s.TrafficTiles = tiles;
+                var names = (string?[])s.TrafficNames.Clone();
+                names[idx] = name;
+                s.TrafficNames = names;
+                s.TrafficBounds = mosaic;
                 s.TrafficTime = DateTime.Now;
                 s.FilesReceived++;
                 s.LastFile = name;
