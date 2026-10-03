@@ -71,7 +71,7 @@ internal sealed class FaceplateControl : Control
     private sealed record Hit(Rect R, string Id, Action? Click, Action? Hold = null);
     private readonly List<Hit> _hits = new();
     private string? _hover, _pressed;
-    private bool _holdFired, _knobDrag, _knobMoved;
+    private bool _holdFired, _knobDrag, _knobMoved, _edgeDrag;
     private Point _knobStart;
     private float _knobStartVol;
     private readonly DispatcherTimer _hold = new() { Interval = TimeSpan.FromMilliseconds(650) };
@@ -273,6 +273,7 @@ internal sealed class FaceplateControl : Control
     public override void Render(DrawingContext g)
     {
         _hits.Clear();
+        SetDotDevice();
         if (H > ClosedH)
         {
             DrawChassisBackground(g);
@@ -289,9 +290,23 @@ internal sealed class FaceplateControl : Control
                 }
                 _hits.Clear();   // nothing is clickable mid-flip
             }
-            return;
         }
-        DrawFaceplate(g);
+        else DrawFaceplate(g);
+        // the analyzer's own visual stays on screen with its last frame unless it is hidden when it stops being live
+        // (the faceplate folds down, art or MUTE takes the square): rendering it empty does not clear it. Visibility
+        // can't change inside the render pass, so it changes right after.
+        bool live = AnalyzerLive;
+        if (_analyzerView.IsVisible != live) Dispatcher.UIThread.Post(() => _analyzerView.IsVisible = live);
+    }
+
+    /// <summary>Tells the dot matrix where device pixels are: the design scale under the window's render scaling.</summary>
+    /// <summary>Development: the render scaling the snapshot renders at, in place of the window's.</summary>
+    public static double? RenderScalingOverride;
+
+    private void SetDotDevice()
+    {
+        double rs = RenderScalingOverride ?? TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
+        DotMatrix.SetDevice(_scale * rs, _ox * rs, _oy * rs);
     }
 
     private void DrawFaceplate(DrawingContext g)
@@ -348,6 +363,7 @@ internal sealed class FaceplateControl : Control
         public override void Render(DrawingContext g)
         {
             if (!_owner.AnalyzerLive) return;
+            _owner.SetDotDevice();
             using (g.PushTransform(Matrix.CreateTranslation(-Bounds.X, -Bounds.Y)))
             {
                 // the glass under the square, then the bars (the parent leaves this square alone meanwhile)
@@ -596,7 +612,6 @@ internal sealed class FaceplateControl : Control
         {
             const double pitch = 2.2, cellW = pitch * DotMatrix.CellCols;
             double mx = trfEnd + 14, my = 171;
-            DotMatrix.Draw(g, DotMatrix.Columns(""), 0, mx, my, pitch, HdCells, lit, ghost, glow: false);
             if (hd != null && synced && hd.Programs.Count > 0 && eng != null)
             {
                 var dim = lit.With(110);
@@ -630,15 +645,16 @@ internal sealed class FaceplateControl : Control
                     chars.AddRange($"HD{p + 1} {hd.Programs[p]!.ToUpperInvariant()}".Select(ch => (ch, ColorOf(p))));
                 }
                 _hdPageLen = chars.Count;
-                for (int i = 0; i < HdCells; i++)
-                {
-                    int k = i + _hdScroll;
-                    if (k >= chars.Count) break;
-                    DotMatrix.Draw(g, DotMatrix.Columns(chars[k].ch.ToString()), 0, mx + i * cellW, my, pitch, 1, chars[k].c, ghost, glow: false);
-                }
+                var hdText = new string(chars.Select(c => c.ch).ToArray());
+                DotMatrix.Draw(g, DotMatrix.Columns(hdText), _hdScroll * DotMatrix.CellCols, mx, my, pitch, HdCells, lit, ghost, glow: false,
+                    cellColors: chars.Select(c => c.c).ToList());
                 _hits.Add(new Hit(R(mx - 3, 166, HdCells * cellW + 6, 26), "hdlist", NextProgram));
             }
-            else _hdPageCount = 0;
+            else
+            {
+                _hdPageCount = 0;
+                DotMatrix.Draw(g, DotMatrix.Columns(""), 0, mx, my, pitch, HdCells, lit, ghost, glow: false);
+            }
         }
 
         // art square: album art / station logo (click to enlarge), else the audio spectrum analyzer; while muted, MUTE
@@ -1056,6 +1072,11 @@ internal sealed class FaceplateControl : Control
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         var p = ToDesign(e.GetPosition(this));
+        if (_edgeDrag)   // the window is resizing from an edge: the hover and cursor hold still until the button is up
+        {
+            if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+            _edgeDrag = false;
+        }
         if (_tuneDrag) { TuneDragTo(p); return; }
         if (_knobDrag)
         {
@@ -1103,7 +1124,7 @@ internal sealed class FaceplateControl : Control
         if (!props.IsLeftButtonPressed) return;
         if (h == null)
         {
-            if (EdgeAt(p) is { } edge) ResizeRequested?.Invoke(edge, e);   // the edge band resizes the window
+            if (EdgeAt(p) is { } edge) { _edgeDrag = true; ResizeRequested?.Invoke(edge, e); }   // the edge band resizes the window
             else DragRequested?.Invoke(e);                                  // bare faceplate: move it
             return;
         }
@@ -1118,6 +1139,7 @@ internal sealed class FaceplateControl : Control
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         _hold.Stop();
+        _edgeDrag = false;
         var p = ToDesign(e.GetPosition(this));
         if (_knobDrag)
         {

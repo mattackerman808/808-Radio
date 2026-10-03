@@ -48,7 +48,12 @@ internal sealed class MainWindow : Window
         Content = _view;
         _view.MenuRequested += e => BuildMenu().Open(_view);
         _view.DragRequested += e => BeginMoveDrag(e);
-        _view.ResizeRequested += (edge, e) => BeginResizeDrag(edge, e);
+        // Avalonia's macOS backend makes BeginResizeDrag a no-op (there is no AppKit call to hand a resize to the
+        // system), so on the Mac the window follows the pointer itself
+        _view.ResizeRequested += (edge, e) => { if (OperatingSystem.IsMacOS()) BeginManualResize(edge, e); else BeginResizeDrag(edge, e); };
+        PointerMoved += (_, e) => ManualResizeTo(e);
+        PointerReleased += (_, _) => _resize = null;
+        PointerCaptureLost += (_, _) => _resize = null;
         _view.MinimizeRequested += () => WindowState = WindowState.Minimized;
         _view.CloseRequested += Close;
         _view.ArtRequested += ShowArt;
@@ -91,8 +96,10 @@ internal sealed class MainWindow : Window
             await Task.Delay(TimeSpan.FromSeconds(seconds));
             try
             {
-                var size = new PixelSize((int)(_view.Bounds.Width * 2), (int)(_view.Bounds.Height * 2));
-                using var rtb = new RenderTargetBitmap(size, new Vector(192, 192));
+                double sc = double.Parse(Environment.GetEnvironmentVariable("R808_SNAP_SCALE") ?? "2", System.Globalization.CultureInfo.InvariantCulture);
+                var size = new PixelSize((int)(_view.Bounds.Width * sc), (int)(_view.Bounds.Height * sc));
+                using var rtb = new RenderTargetBitmap(size, new Vector(96 * sc, 96 * sc));
+                FaceplateControl.RenderScalingOverride = sc;
                 rtb.Render(_view);
                 rtb.Save(path);
                 Console.WriteLine($"snapshot: {path} {size.Width}x{size.Height}");
@@ -100,6 +107,46 @@ internal sealed class MainWindow : Window
             catch (Exception ex) { Console.WriteLine("snapshot failed: " + ex); }
             Close();
         };
+    }
+
+    // ---------------------------------------------------------------- manual edge resize (macOS)
+
+    private sealed record ResizeDrag(WindowEdge Edge, PixelPoint Start, PixelPoint StartPos, double StartW, double StartH);
+    private ResizeDrag? _resize;
+
+    private void BeginManualResize(WindowEdge edge, PointerPressedEventArgs e)
+    {
+        _resize = new ResizeDrag(edge, _view.PointToScreen(e.GetPosition(_view)), Position, Width, Height);
+        e.Pointer.Capture(_view);
+    }
+
+    /// <summary>One step of the manual resize: the width follows the pointer along the dragged edge, the height keeps the
+    /// faceplate's proportions, and a west or north edge keeps the opposite edge in place.</summary>
+    private void ManualResizeTo(PointerEventArgs e)
+    {
+        if (_resize is not { } r) return;
+        if (!e.GetCurrentPoint(_view).Properties.IsLeftButtonPressed) { _resize = null; return; }
+        var now = _view.PointToScreen(e.GetPosition(_view));
+        double scale = DesktopScaling;
+        double dx = (now.X - r.Start.X) / scale, dy = (now.Y - r.Start.Y) / scale;
+        bool west = r.Edge is WindowEdge.West or WindowEdge.NorthWest or WindowEdge.SouthWest;
+        bool east = r.Edge is WindowEdge.East or WindowEdge.NorthEast or WindowEdge.SouthEast;
+        bool north = r.Edge is WindowEdge.North or WindowEdge.NorthWest or WindowEdge.NorthEast;
+        bool south = r.Edge is WindowEdge.South or WindowEdge.SouthWest or WindowEdge.SouthEast;
+        double ratio = _view.DesignHeight / DesignW;
+        // each dragged axis proposes a width; a corner takes the larger change
+        double fromX = east ? r.StartW + dx : west ? r.StartW - dx : r.StartW;
+        double fromY = south ? r.StartW + dy / ratio : north ? r.StartW - dy / ratio : r.StartW;
+        double w = Math.Abs(fromX - r.StartW) >= Math.Abs(fromY - r.StartW) ? fromX : fromY;
+        w = Math.Round(Math.Max(MinWidth, w));
+        double h = Math.Round(w * ratio);
+        var pos = r.StartPos;
+        if (west) pos = pos.WithX(r.StartPos.X + (int)Math.Round((r.StartW - w) * scale));
+        if (north) pos = pos.WithY(r.StartPos.Y + (int)Math.Round((r.StartH - h) * scale));
+        _sizing = true;
+        if (pos != Position) Position = pos;
+        Width = w; Height = h;
+        _sizing = false;
     }
 
     private void FitHeight()

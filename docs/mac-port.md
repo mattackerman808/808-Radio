@@ -52,6 +52,7 @@ static libusb needs CoreFoundation, IOKit and Security, which the script adds to
 dotnet build src/Radio808.Avalonia -c Debug
 dotnet src/Radio808.Avalonia/bin/Debug/net9.0/808Radio.dll              # run
 dotnet src/Radio808.Avalonia/bin/Debug/net9.0/808Radio.dll --snapshot face.png 10   # run 10 s, save the faceplate (2x PNG), exit
+R808_SNAP_SCALE=1 dotnet src/Radio808.Avalonia/bin/Debug/net9.0/808Radio.dll --snapshot face.png 10   # the same at 1x: how a non-Retina monitor sees it
 ```
 
 `src/Radio808.Shared` holds what both shells use (`RadioController`, `AppSettings`, `AppLog`); the Windows app
