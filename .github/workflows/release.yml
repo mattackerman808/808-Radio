@@ -40,6 +40,8 @@ jobs:
   mac:
     name: macOS arm64
     runs-on: macos-15
+    env:
+      HAVE_SIGNING: ${{ secrets.MAC_SIGN_P12 != '' }}   # (secrets can't be tested in a step's `if` directly)
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
@@ -57,7 +59,7 @@ jobs:
             rtl-sdr/build-mac
           key: native-mac-${{ runner.arch }}-${{ hashFiles('native/mac/build-native-mac.sh', 'native/mac/r808audio.c', 'native/mac/miniaudio.h', '.gitmodules') }}-${{ hashFiles('.git/modules/nrsc5/HEAD', '.git/modules/rtl-sdr/HEAD') }}
       - name: Signing identity and notarization credentials
-        if: ${{ secrets.MAC_SIGN_P12 != '' }}
+        if: env.HAVE_SIGNING == 'true'
         env:
           MAC_SIGN_P12: ${{ secrets.MAC_SIGN_P12 }}
           MAC_SIGN_PASSWORD: ${{ secrets.MAC_SIGN_PASSWORD }}
