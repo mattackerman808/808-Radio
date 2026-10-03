@@ -195,7 +195,15 @@ public sealed class RadioEngine : IDisposable
     /// Seeks to the next station up (+1) or down (-1), wrapping around the band. Audio is muted while seeking.
     /// Returns false (and goes back to the start frequency) if the whole band was empty.
     /// </summary>
-    public async Task<bool> SeekAsync(int direction, CancellationToken ct = default)
+    /// <summary>How long an HD-only seek waits on a station for HD sync before moving on (nrsc5 usually syncs within two seconds).</summary>
+    public static readonly TimeSpan HdSeekWait = TimeSpan.FromSeconds(3.5);
+
+    /// <summary>
+    /// Steps through the band from the current channel in <paramref name="direction"/> until a station is found: one
+    /// whose envelope ripple is low (a clean carrier). With <paramref name="hdOnly"/>, the station must also sync HD
+    /// within <see cref="HdSeekWait"/>, else the seek goes on. Wraps once around the band; false if nothing was found.
+    /// </summary>
+    public async Task<bool> SeekAsync(int direction, bool hdOnly = false, CancellationToken ct = default)
     {
         long start = Frequency;
         long f = (start - FirstChannel) / ChannelStep * ChannelStep + FirstChannel;   // snap to the channel grid
@@ -215,7 +223,15 @@ public sealed class RadioEngine : IDisposable
                 _rx.Equalizer.TakeEnvelopeRipple();
                 await Task.Delay(180, ct).ConfigureAwait(false);
                 double ripple = _rx.Equalizer.TakeEnvelopeRipple();
-                if (ripple > 0 && ripple < SeekRippleThreshold) return true;
+                if (!(ripple > 0 && ripple < SeekRippleThreshold)) continue;
+                if (!hdOnly) return true;
+                // an analog station is here: give its digital sidebands a moment to sync
+                var until = DateTime.UtcNow + HdSeekWait;
+                while (DateTime.UtcNow < until)
+                {
+                    if (_hd.Status.Synced) return true;
+                    await Task.Delay(100, ct).ConfigureAwait(false);
+                }
             }
             Frequency = start;
             return false;

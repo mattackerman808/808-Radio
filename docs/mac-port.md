@@ -12,7 +12,7 @@ needs ships inside it, signed and notarized, so a user installs nothing else.
 | nrsc5 event layout on arm64 | **verified** by `native/mac/check_offsets.c` against the offsets in `Nrsc5Native.cs` / `HdDecoder.cs` |
 | Core builds for `net9.0` | **done**: multi-targets `net9.0` (miniaudio) and `net9.0-windows` (WASAPI, used by the Windows app) |
 | Console radio on the Mac (`radio808-tools play`, network dongle) | **done**: 2026-10-02, HD1 audio from a Pi 4 over Ethernet (KBAY 98.5, MER 11-12 dB, ~24 Mb/s), discovery finds the Pi by mDNS |
-| Mac GUI (`src/Radio808.Avalonia`) | **at parity** (2026-10-02) except where noted: faceplate, flip-down panel, menu with frame rate, shortcuts, edge resize, single instance, animated art pop-out, weather radar over a street map, live traffic mosaic. Not yet: media keys (untested), the `.app` bundle and signing. Note: the Pi's Avahi advertisement is a static file, so "rtl_tcp on console" stays in the Source menu even when the Pi has no dongle. |
+| Mac GUI (`src/Radio808.Avalonia`) | **at parity** (2026-10-02) except where noted: faceplate, flip-down panel, menu with frame rate, shortcuts, edge resize, single instance, animated art pop-out, weather radar over a street map (shared with Windows since 2026-10-03), live traffic mosaic, WX / TRAFFIC keys lit from the station's service guide, HD-only seek. Not yet: media keys (untested), the `.app` bundle and signing. Note: the Pi's Avahi advertisement is a static file, so "rtl_tcp on console" stays in the Source menu even when the Pi has no dongle. |
 | Signed, notarized `.app` | not started (phase 2) |
 | USB dongle on the Mac (`librtlsdr.dylib`) | **done** (2026-10-02): libusb linked in statically, no driver needed on macOS, verified playing from an RTL-SDR Blog V3 on the Mac |
 
@@ -79,12 +79,20 @@ broadcast gives as latitude/longitude (north/west and south/east edges; nrsc5's 
 `HdStatus.WeatherBounds`). It covers equal spans of latitude and longitude, so it is a plain lat/lon rectangle, not
 Mercator. The traffic map is different: nine complete 200 x 200 map tiles, shown as a mosaic.
 
-The Mac app draws the radar over a street map of the same box (`Map/`): `PmTiles` reads Swiftcamp's basemap archive
-(`cdn.swiftcamp.app/street-z15-20260910.pmtiles`, Protomaps schema, OpenStreetMap data, gzip) by HTTP byte range and
-caches tiles under `~/Library/Application Support/808Radio/maps`; `Mvt` decodes the vector tiles; `BaseMap` renders
-land use, water, roads, boundaries and place names in Swiftcamp's palette into a bitmap (cached as a PNG per box and
-size); `MapWindow` puts the radar on top, placed by its corners (over a one-degree box the plate-carrée-on-Mercator
-error is under a pixel), with the time and the ODbL attribution. Offline, the radar shows alone.
+Both apps draw the radar over a street map of the same box. The map code is shared (`src/Radio808.Shared/Map`):
+`PmTiles` reads Swiftcamp's basemap archive (`cdn.swiftcamp.app/street-z15-20260910.pmtiles`, Protomaps schema,
+OpenStreetMap data, gzip) by HTTP byte range and caches tiles on disk; `Mvt` decodes the vector tiles; `BaseMap`
+is the style (land use, water, roads, boundaries and place names in Swiftcamp's palette) over an `IMapCanvas`
+that each app implements with its own drawing (`Map/MapImage.cs` on Avalonia, `MapForm.cs` on GDI+), rendering a
+bitmap once per box and size (cached as a PNG). The map window puts the radar on top, placed by its corners (over
+a one-degree box the plate-carrée-on-Mercator error is under a pixel), with the time and the ODbL attribution.
+
+The cache is meant to work without the internet (`MapCache`, driven by the controller's once-a-second tick): as
+soon as a station's weather box is known, every tile the box could need at any likely window size is fetched
+(a few dozen), so from then on the map draws from disk; a fetch that fails is retried every five minutes. Once a
+day the archive's ETag is checked with a HEAD request; a changed archive empties the cache and refetches. The
+cache lives under `maps/` in the settings folder (`~/Library/Application Support/808Radio` on the Mac,
+`%APPDATA%\808Radio` on Windows). With nothing cached and no internet, the radar shows alone.
 
 `808Radio --mapsnap radar.png N W S E out.png [seconds]` renders a saved radar image over its map without the radio;
 `--mvtdump tile.mvt` lists a cached tile's layers and tags. The console tool saves a station's images with

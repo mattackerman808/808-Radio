@@ -532,7 +532,7 @@ internal sealed class NerdPanel
             L("Blend", eng.HdTooWeak ? "analog · HD too weak to play"
                 : (b.PlayingHd ? "HD" : "analog") + (b.Aligned ? $"  lead {b.HdLeadSeconds:0.000} s  score {b.AlignScore:0.00}" : "  not aligned"));
             L("Loudness", $"HD gain {b.HdGain:0.00}" + (b.RetryIn > 0.5 ? $"  retry in {b.RetryIn:0} s" : ""));
-            L("Data", hd.FilesReceived > 0 ? $"{hd.FilesReceived} files  {hd.LastFile}" : "—");
+            L("Data", (hd.DataServices ?? "") + (hd.FilesReceived > 0 ? $"{(hd.DataServices != null ? " · " : "")}{hd.FilesReceived} files  {hd.LastFile}" : hd.DataServices == null ? "—" : ""));
             H("AUDIO / CPU");
             L("Output", $"buffer {p.BufferedMs:0} ms  drift {p.DriftPpm:+0;-0} ppm");
             L("Glitches", $"{p.Underruns} underruns  {eng.HdDecoder.DroppedBlocks} HD drops");

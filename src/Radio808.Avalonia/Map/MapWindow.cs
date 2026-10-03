@@ -7,6 +7,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Radio808.Avalonia.Drawing;
 using Radio808.Core.Hd;
+using Radio808.Shared.Map;
 
 namespace Radio808.Avalonia.Map;
 
@@ -75,9 +76,9 @@ internal sealed class MapWindow : Window
         {
             try
             {
-                var bmp = await BaseMap.RenderAsync(_bounds, w, h);
+                var bmp = await MapImage.RenderAsync(_bounds, w, h);
                 if (w != _baseW || h != _baseH) return;   // resized meanwhile
-                if (bmp == null) _status = "no map (offline); the radar image alone";
+                if (bmp == null) _status = "no map (offline, nothing cached yet); the radar image alone";
                 else { _base = bmp; _status = ""; }
             }
             catch (Exception ex) { _status = "map failed: " + ex.Message; }

@@ -36,6 +36,10 @@ public sealed class App : Application
                 var inv = System.Globalization.CultureInfo.InvariantCulture;
                 var bounds = new Radio808.Core.Hd.MapBounds(double.Parse(m[2], inv), double.Parse(m[3], inv), double.Parse(m[4], inv), double.Parse(m[5], inv));
                 var win = new Map.MapWindow("Weather map test", new global::Avalonia.Media.Imaging.Bitmap(m[1]), bounds, DateTime.Now);
+                // the offline cache fills for this box too, as it would in the app (its progress goes to the log)
+                var cacheTick = new global::Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                cacheTick.Tick += (_, _) => Radio808.Shared.Map.MapCache.Tick(bounds);
+                cacheTick.Start();
                 win.Opened += async (_, _) =>
                 {
                     try { await win.SnapshotTo(m[6], m.Length > 7 ? double.Parse(m[7], inv) : 15); }

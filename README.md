@@ -24,7 +24,7 @@ refresh rate: spectrum and waterfall with click-to-tune, the FM multiplex, and l
 ## macOS
 
 The same radio runs on the Mac (Apple Silicon): the faceplate and the instrument panel, a USB dongle or the network
-dongle on a Raspberry Pi, and on top of what Windows has, the HD weather radar drawn over a street map. It's built
+dongle on a Raspberry Pi, the HD weather radar drawn over a street map (cached for use offline). It's built
 with Avalonia from `src/Radio808.Avalonia`; the receiver is the same code. See [docs/mac-port.md](docs/mac-port.md)
 for building and status. No driver is needed for a USB dongle on macOS.
 
@@ -49,15 +49,16 @@ anywhere, though the tuning grid, de-emphasis and program types are US defaults 
 
 | | |
 |---|---|
-| **Volume** | drag or scroll the knob; click it to mute (or ↑/↓, M) |
-| **Tune** | turn the **TUNE** knob (right of the display; one channel per notch, click it to seek), scroll over the display, or ←/→ |
-| **Seek** | the ⏮ ⏭ keys, Ctrl+←/→, or media keys |
+| **Volume** | drag or scroll the knob in the bottom-right corner (its light ring is the level); click it to mute (or ↑/↓, M) |
+| **Tune** | turn the **TUNE** knob (right of the display, above the volume knob; one channel per notch, click it to seek), scroll over the display, or ←/→ |
+| **Seek** | the ⏮ ⏭ keys, Ctrl+←/→, or media keys; with **HD SEEK** lit, seek skips analog-only stations |
 | **Presets 1–6** | click to tune, hold (or right-click, or Ctrl+1–6) to save |
 | **SRC** | HD (automatic blend) or analog FM only (A) |
 | **HD CH** | next HD program: HD1, HD2 … (H); or click a number in the display's `HD 1 2 3` |
 | **DISP** | what the two display lines show: song / station, station / song, station / genre, artist / title, frequency / station (D) |
 | **Bulb key** | illumination color (C): cyan, amber, green, red, blue, white |
-| **▲** | flip the faceplate down to the instrument panel (O) |
+| **OPEN** | flip the faceplate down to the instrument panel (O) |
+| **WX** / **TRAFFIC** | the weather radar and traffic maps, when the station sends them (the keys light up as described below) |
 | **Right-click** | source (USB or network dongle), gain, frequency correction, antenna power (bias-tee), album art, panel frame rate, always on top, … |
 
 Drag the faceplate to move it; drag its edges to resize. The display has a large dot-matrix line and a small one with
@@ -66,10 +67,13 @@ frequency / station; long text scrolls). Below them is a row of fixed status lig
 station's HD programs (`HD 1 2 3`: the one you're hearing is lit, the one you've chosen blinks while it locks in;
 choose with **HD CH** or click a number). The lights: **HD** (outlined: found; filled: you're hearing
 the digital audio), **WEAK** in red (HD found, with its station name and programs, but the signal is too poor to play
-its audio, so you hear the analog), the stereo rings, **RDS**, **SEEK**, **WX** / **TRAFFIC** (weather / traffic map
-available: click it). The preset you're on is outlined in the row of preset keys. The slot on the right of the
-faceplate is the signal meter: the reception quality of what you're hearing (HD MER while HD plays, else the FM stereo pilot's
-signal-to-noise); it turns red with **OVL** if the dongle overloads.
+its audio, so you hear the analog), the stereo rings, **RDS**, **SEEK** (**HD SEEK** when seek is set to stop only at
+HD stations, in the right-click menu), **WX** / **TRAFFIC** (the weather radar and traffic maps: dark on stations
+that don't send them, blinking once the station's service guide says they're coming, lit when one has arrived; open
+them with the **WX** and **TRAFFIC** keys left of the display, or click the light). The preset you're on is outlined in
+the row of preset keys. The antenna with five dots at the right end of that row is the signal meter: the reception
+quality of what you're hearing (HD MER while HD plays, else the FM stereo pilot's signal-to-noise); the **OVL** light
+beside it comes on red if the dongle overloads.
 The square at the right of the display shows the HD album art or station logo (click it for a bigger picture with the
 song and station), or else an old-school audio spectrum analyzer; right-click → *Album art on the display* to always
 have the analyzer.

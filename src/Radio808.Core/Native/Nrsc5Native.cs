@@ -27,6 +27,7 @@ internal static unsafe class Nrsc5Native
     public const uint EventBer = 5;
     public const uint EventAudio = 7;
     public const uint EventId3 = 8;
+    public const uint EventSig = 9;
     public const uint EventLot = 10;
     public const uint EventAudioService = 14;
     public const uint EventStationName = 16;
@@ -35,7 +36,11 @@ internal static unsafe class Nrsc5Native
     public const uint EventEmergencyAlert = 22;
     public const uint EventHereImage = 23;
 
-    public const byte SigServiceAudio = 0;
+    public const byte SigServiceAudio = 0, SigServiceData = 1;
+    public const byte SigComponentData = 1;
+    // data service content types (NRSC5_MIME_*): what a station's Service Information Guide advertises
+    public const uint MimeHereImage = 0xB7F03DFC, MimeHereTpeg = 0x82F03DFC, MimeNavteq = 0x2D42AC3E, MimeHdTmc = 0xEECB55B6;
+    public const uint MimeTtnTpeg1 = 0xB39EBEB2, MimeTtnTpeg2 = 0x4EB03469, MimeTtnTpeg3 = 0x52103469, MimeTtnStmTraffic = 0xFF8422D7, MimeTtnStmWeather = 0xEF042E96;
     public const int HereImageTraffic = 8;
     public const int HereImageWeather = 13;
 

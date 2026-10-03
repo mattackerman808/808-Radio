@@ -276,6 +276,7 @@ internal sealed class MainWindow : Window
         m.Items.Add(Item("Auto HD", () => _c.SetForceAnalog(!_c.Settings.ForceAnalog), !_c.Settings.ForceAnalog));
         m.Items.Add(Item("Multipath equalizer", () => _c.SetEqualizer(!_c.Settings.Equalizer), _c.Settings.Equalizer));
         m.Items.Add(Item("Force mono", () => _c.SetForceMono(!_c.Settings.ForceMono), _c.Settings.ForceMono));
+        m.Items.Add(Item("Seek HD stations only", () => _c.SetSeekHd(!_c.Settings.SeekHd), _c.Settings.SeekHd));
         var gain = new MenuItem { Header = "Tuner gain" };
         gain.Items.Add(Item("Automatic (peak each station)", () => _c.SetGain(null), _c.Settings.AutoGain));
         gain.Items.Add(new Separator());

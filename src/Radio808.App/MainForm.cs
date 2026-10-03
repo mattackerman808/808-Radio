@@ -357,6 +357,7 @@ internal sealed class MainForm : Form
         m.Items.Add(new ToolStripMenuItem("Auto HD", null, (_, _) => _c.SetForceAnalog(!_c.Settings.ForceAnalog)) { Checked = !_c.Settings.ForceAnalog });
         m.Items.Add(new ToolStripMenuItem("Multipath equalizer", null, (_, _) => _c.SetEqualizer(!_c.Settings.Equalizer)) { Checked = _c.Settings.Equalizer });
         m.Items.Add(new ToolStripMenuItem("Force mono", null, (_, _) => _c.SetForceMono(!_c.Settings.ForceMono)) { Checked = _c.Settings.ForceMono });
+        m.Items.Add(new ToolStripMenuItem("Seek HD stations only", null, (_, _) => _c.SetSeekHd(!_c.Settings.SeekHd)) { Checked = _c.Settings.SeekHd });
         var gain = new ToolStripMenuItem("Tuner gain");
         gain.DropDownItems.Add(new ToolStripMenuItem("Automatic (peak each station)", null, (_, _) => _c.SetGain(null)) { Checked = _c.Settings.AutoGain });
         gain.DropDownItems.Add(new ToolStripSeparator());
@@ -456,6 +457,8 @@ internal sealed class MainForm : Form
         _artPopup.Show(this);
     }
 
+    private MapForm? _weather;
+
     private void ShowMap(string which)
     {
         var hd = _c.Engine?.Hd;
@@ -467,6 +470,15 @@ internal sealed class MainForm : Form
             {
                 using var ms = new System.IO.MemoryStream(hd.WeatherMap);
                 img = new Bitmap(Image.FromStream(ms));
+                if (hd.WeatherBounds is { } wb)
+                {
+                    // the radar over a street map of the same box
+                    if (_weather != null) { _weather.Update(img, hd.WeatherTime); _weather.Activate(); return; }
+                    _weather = new MapForm($"Weather — {hd.StationName}", img, wb, hd.WeatherTime, Icon);
+                    _weather.FormClosed += (_, _) => _weather = null;
+                    _weather.Show(this);
+                    return;
+                }
             }
             else if (which == "traffic")
             {

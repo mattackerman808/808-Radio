@@ -8,20 +8,22 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
 
-namespace Radio808.Avalonia.Map;
+namespace Radio808.Shared.Map;
 
 /// <summary>
 /// Reads tiles out of a PMTiles v3 archive over HTTP byte-range requests (the format is one file: a header, a
 /// directory tree, then the tiles, all addressed by offset), caching directories in memory and tiles on disk.
 /// The archive here is Swiftcamp's basemap on its CDN, cut from the Protomaps planet; gzip inside and out.
+/// Offline, cached tiles are served and the rest come back null (after one failure the network is left alone
+/// for half a minute, so a map renders from the cache without waiting on every tile).
 /// </summary>
-internal sealed class PmTiles
+public sealed class PmTiles
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly string _url, _cacheDir;
     private Header? _header;
     private readonly ConcurrentDictionary<long, Entry[]> _dirs = new();
-    private readonly SemaphoreSlimPool _locks = new();
+    private DateTime _offlineUntil;
 
     public PmTiles(string url, string cacheDir)
     {
@@ -29,6 +31,33 @@ internal sealed class PmTiles
         _cacheDir = cacheDir;
         Directory.CreateDirectory(cacheDir);
     }
+
+    public string CacheDir => _cacheDir;
+
+    /// <summary>True after a fetch failed in the last half minute: the archive is treated as unreachable meanwhile.</summary>
+    public bool Offline => DateTime.UtcNow < _offlineUntil;
+
+    /// <summary>Forgets the archive's layout (after it changed on the server) so the next tile re-reads it.</summary>
+    public void Reset() { _header = null; _dirs.Clear(); _offlineUntil = DateTime.MinValue; }
+
+    /// <summary>
+    /// A token for the archive version on the server (its ETag, else Last-Modified, else its length), or null if it
+    /// can't be reached.
+    /// </summary>
+    public async Task<string?> VersionAsync()
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Head, _url);
+            using var resp = await Http.SendAsync(req).ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+            return resp.Headers.ETag?.Tag ?? resp.Content.Headers.LastModified?.ToString("o") ?? resp.Content.Headers.ContentLength?.ToString();
+        }
+        catch (Exception ex) { AppLog.Write("map archive check: " + ex.Message); return null; }
+    }
+
+    public bool IsCached(int z, int x, int y) => File.Exists(TileFile(z, x, y));
+    private string TileFile(int z, int x, int y) => Path.Combine(_cacheDir, $"{z}-{x}-{y}.mvt");
 
     private sealed record Header(long RootOff, long RootLen, long LeafOff, long TileOff, int InternalCompression, int TileCompression, int MinZoom, int MaxZoom);
     private readonly record struct Entry(long TileId, long Offset, int Length, int RunLength);
@@ -131,11 +160,26 @@ internal sealed class PmTiles
         return null;
     }
 
-    /// <summary>The decoded (decompressed) tile, or null if the archive has none there. Tiles are cached on disk.</summary>
+    /// <summary>
+    /// The decoded (decompressed) tile, or null if the archive has none there or can't be reached. Tiles are
+    /// cached on disk; a cached tile is served without touching the network.
+    /// </summary>
     public async Task<byte[]?> GetTileAsync(int z, int x, int y)
     {
-        string file = Path.Combine(_cacheDir, $"{z}-{x}-{y}.mvt");
+        string file = TileFile(z, x, y);
         if (File.Exists(file)) return await File.ReadAllBytesAsync(file).ConfigureAwait(false);
+        if (Offline) return null;
+        try { return await FetchTileAsync(z, x, y, file).ConfigureAwait(false); }
+        catch (Exception ex)
+        {
+            if (!Offline) AppLog.Write("map tiles: " + ex.Message);
+            _offlineUntil = DateTime.UtcNow.AddSeconds(30);
+            return null;
+        }
+    }
+
+    private async Task<byte[]?> FetchTileAsync(int z, int x, int y, string file)
+    {
         var h = await HeaderAsync().ConfigureAwait(false);
         if (z < h.MinZoom || z > h.MaxZoom) return null;
         long id = TileId(z, x, y);
@@ -155,6 +199,4 @@ internal sealed class PmTiles
         }
         return null;
     }
-
-    private sealed class SemaphoreSlimPool { }
 }

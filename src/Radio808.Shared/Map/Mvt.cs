@@ -1,12 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using Avalonia;
 
-namespace Radio808.Avalonia.Map;
+namespace Radio808.Shared.Map;
 
 /// <summary>A Mapbox Vector Tile decoded just far enough to draw: layers of features with tags and geometry.</summary>
-internal sealed class MvtTile
+public sealed class MvtTile
 {
     public readonly List<MvtLayer> Layers = new();
 
@@ -25,9 +24,9 @@ internal sealed class MvtTile
     }
 }
 
-internal enum MvtGeom { Unknown = 0, Point = 1, Line = 2, Polygon = 3 }
+public enum MvtGeom { Unknown = 0, Point = 1, Line = 2, Polygon = 3 }
 
-internal sealed class MvtLayer
+public sealed class MvtLayer
 {
     public string Name = "";
     public int Extent = 4096;
@@ -76,12 +75,12 @@ internal sealed class MvtLayer
     }
 }
 
-internal sealed class MvtFeature
+public sealed class MvtFeature
 {
     public MvtGeom Type;
     public readonly Dictionary<string, object> Tags = new();
     /// <summary>Rings / lines / points in tile units (0..extent), as decoded from the command stream.</summary>
-    public readonly List<Point[]> Parts = new();
+    public readonly List<MapPt[]> Parts = new();
 
     public string? Str(string key) => Tags.TryGetValue(key, out var v) ? v as string : null;
     public double Num(string key, double dflt = 0) => Tags.TryGetValue(key, out var v) && v is double d ? d : dflt;
@@ -129,7 +128,7 @@ internal sealed class MvtFeature
     private void DecodeGeometry(List<uint> g)
     {
         long x = 0, y = 0;
-        var cur = new List<Point>();
+        var cur = new List<MapPt>();
         int i = 0;
         while (i < g.Count)
         {
@@ -141,7 +140,7 @@ internal sealed class MvtFeature
                 {
                     if (cur.Count > 0) { Parts.Add(cur.ToArray()); cur.Clear(); }
                     x += Pb.Zigzag(g[i++]); y += Pb.Zigzag(g[i++]);
-                    cur.Add(new Point(x, y));
+                    cur.Add(new MapPt(x, y));
                 }
             }
             else if (id == 2)   // LineTo
@@ -149,7 +148,7 @@ internal sealed class MvtFeature
                 for (int k = 0; k < count; k++)
                 {
                     x += Pb.Zigzag(g[i++]); y += Pb.Zigzag(g[i++]);
-                    cur.Add(new Point(x, y));
+                    cur.Add(new MapPt(x, y));
                 }
             }
             else if (id == 7)   // ClosePath
@@ -163,7 +162,7 @@ internal sealed class MvtFeature
 }
 
 /// <summary>A minimal protobuf wire-format reader.</summary>
-internal sealed class Pb
+public sealed class Pb
 {
     private readonly byte[] _d;
     private int _pos;

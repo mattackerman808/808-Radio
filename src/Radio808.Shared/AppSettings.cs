@@ -24,6 +24,8 @@ public sealed class AppSettings
     public bool ForceAnalog { get; set; }
     public bool Equalizer { get; set; } = true;
     public bool ForceMono { get; set; }
+    /// <summary>Seek stops only at stations that sync HD.</summary>
+    public bool SeekHd { get; set; }
     /// <summary>Peak the tuner gain automatically for each station (recommended).</summary>
     public bool AutoGain { get; set; } = true;
     /// <summary>Fixed tuner gain in dB, used when <see cref="AutoGain"/> is off.</summary>

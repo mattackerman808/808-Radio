@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using Avalonia;
@@ -86,7 +87,7 @@ internal sealed class FaceplateControl : Control
     private string? _subText;
     private List<bool[]> _subCols = new();
     private int _subScroll, _subTicks, _subCells = 10;
-    private const int HdCells = 13;
+    private const int HdCells = 12;
     private string? _hdKey;
     private int _hdPage, _hdPageCount, _hdPageLen, _hdTicks, _hdScroll;
     private string? _flash;
@@ -312,8 +313,7 @@ internal sealed class FaceplateControl : Control
     private void DrawFaceplate(DrawingContext g)
     {
         DrawBody(g);
-        DrawLeftKeys(g);
-        DrawKnob(g);
+        DrawKeyBlock(g);
         DrawDisplay(g);
         DrawKeyStrip(g);
         DrawRightSide(g);
@@ -400,21 +400,10 @@ internal sealed class FaceplateControl : Control
         var face = R(24, 26, 952, 248);
         g.FillRounded(Gradient(face, Face1, Face2, 90), face, 20);
         g.DrawRounded(Pen(Rgb(0x05, 0x05, 0x06), 2), face, 20);
-        // brand above the display, model name at the right
-        BrandMark.Draw(g, 538, 32, 20, Silver);
-        g.Label("HD-808", 9.5, Grey, R(800, 32, 92, 20), Align.Far);
-
-        // OPEN: flips the faceplate down (where a head unit has its open/eject key)
-        var open = R(272, 34, 40, 16);
-        bool hotOpen = _hover == "open";
-        g.FillRounded(Brush(hotOpen ? Rgb(0x3A, 0x40, 0x48) : Rgb(0x16, 0x18, 0x1C)), open, 4);
-        {
-            var b = Brush(Lit);
-            double cx = open.X + open.Width / 2, cy = open.Y + 7;
-            g.FillPolygon(b, new Point(cx - 5, cy + 2), new Point(cx + 5, cy + 2), new Point(cx, cy - 3));
-            g.FillRect(b, cx - 5, cy + 4, 10, 1.6);
-        }
-        _hits.Add(new Hit(open, "open", ToggleOpen));
+        // brand at the left, the obligatory 90s badge in italic chrome at the right before the window keys
+        BrandMark.Draw(g, 40, 32, 20, Silver);
+        var badge = new FormattedText("DIGITAL", CultureInfo.InvariantCulture, FlowDirection.LeftToRight, new Typeface(G.Ui, FontStyle.Italic, FontWeight.Bold), 11.5, Brush(Silver));
+        g.DrawText(badge, new Point(912 - badge.Width, 34));
 
         // window keys (the window has no frame): minimize and close, top right
         WindowKey(g, R(926, 34, 18, 16), "min", () => MinimizeRequested?.Invoke(), close: false);
@@ -433,25 +422,53 @@ internal sealed class FaceplateControl : Control
         _hits.Add(new Hit(r, id, click));
     }
 
-    private void DrawLeftKeys(DrawingContext g)
+    // the key block left of the display: nine keys of one size in three rows, grouped by what they do
+    private const double KeyW = 70, KeyH = 56;
+    private static Rect KeyAt(int col, int row) => R(36 + col * 78, 57 + row * 66, KeyW, KeyH);
+
+    private void DrawKeyBlock(DrawingContext g)
     {
         var lit = Lit;
-        var mute = R(36, 40, 86, 54);
-        Key(g, mute, "mute", _c.ToggleMute, pattern: true);
-        SpeakerIcon(g, mute, _c.Settings.Muted, lit);
-
-        var src = R(36, 110, 62, 56);
+        // row 1: the panel, display and looks (OPEN and MUTE swap rows, so OPEN is top left)
+        var mute = KeyAt(0, 1);
+        Key(g, mute, "mute", _c.ToggleMute);
+        SpeakerIcon(g, R(mute.X, mute.Y + 6, mute.Width, 28), _c.Settings.Muted, lit);
+        g.Label("MUTE", 9.5, lit, R(mute.X, mute.Y + 39, mute.Width, 12), Align.Center, bold: true);
+        TextKey(g, KeyAt(1, 0), "disp", "DISP", lit, NextDisplay);
+        var col = KeyAt(2, 0);
+        Key(g, col, "color", CycleColor);
+        BulbIcon(g, col.X + col.Width / 2, col.Y + 23, lit);
+        g.Label("COLOR", 9.5, lit, R(col.X, col.Y + 39, col.Width, 12), Align.Center, bold: true);
+        // row 2: sound and the maps
+        OpenKey(g, KeyAt(0, 0), lit);
+        MapKey(g, KeyAt(1, 1), "wxkey", "WX", "weather");
+        MapKey(g, KeyAt(2, 1), "trfkey", "TRAFFIC", "traffic");
+        // row 3: HD, ending beside the seek keys
+        var src = KeyAt(0, 2);
         Key(g, src, "src", () =>
         {
             _c.SetForceAnalog(!_c.Settings.ForceAnalog);
             Flash(_c.Settings.ForceAnalog ? "SOURCE FM" : "SOURCE HD");
         });
         PowerIcon(g, src.X + src.Width / 2, src.Y + 20, 8, lit);
-        g.Label("SRC", 12, lit, R(src.X, src.Y + 32, src.Width, 18), Align.Center, bold: true);
+        g.Label("SRC", 9.5, lit, R(src.X, src.Y + 39, src.Width, 12), Align.Center, bold: true);
+        TwoLineKey(g, KeyAt(1, 2), "band", "HD", "CH", lit, NextProgram);
+        HdSeekKey(g, KeyAt(2, 2), lit);
+    }
 
-        var col = R(36, 182, 86, 54);
-        Key(g, col, "color", CycleColor, pattern: true);
-        BulbIcon(g, col.X + col.Width / 2, col.Y + col.Height / 2, lit);
+    /// <summary>A key with one centered word.</summary>
+    private void TextKey(DrawingContext g, Rect r, string id, string label, Color c, Action click, bool lit = false)
+    {
+        Key(g, r, id, click, lit: lit);
+        g.Label(label, 11, c, R(r.X, r.Y + (r.Height - 16) / 2, r.Width, 16), Align.Center, bold: true);
+    }
+
+    /// <summary>A key with a big word over a small one (the HD keys).</summary>
+    private void TwoLineKey(DrawingContext g, Rect r, string id, string top, string bottom, Color c, Action click, bool lit = false)
+    {
+        Key(g, r, id, click, lit: lit);
+        g.Label(top, 13, c, R(r.X, r.Y + 10, r.Width, 16), Align.Center, bold: true);
+        g.Label(bottom, 10, c, R(r.X, r.Y + 30, r.Width, 14), Align.Center, bold: true);
     }
 
     public void CycleColor()
@@ -461,34 +478,26 @@ internal sealed class FaceplateControl : Control
         Flash("COLOR " + Illuminations[_c.Settings.Illumination].Name);
     }
 
-    private void DrawKnob(DrawingContext g)
-    {
-        double cx = 196, cy = 124, r = 58;
-        var lit = Lit;
-        float vol = _c.Settings.Volume;
-        bool muted = _c.Settings.Muted;
-        var ring = R(cx - r - 9, cy - r - 9, 2 * (r + 9), 2 * (r + 9));
-        g.DrawArc(Pen(lit.With(40), 6), ring, 135, 270);
-        if (vol > 0.001f)
-        {
-            var c = muted ? Grey : lit;
-            g.DrawArc(Pen(c.With(60), 14, round: true), ring, 135, 270 * vol);
-            g.DrawArc(Pen(c, 5, round: true), ring, 135, 270 * vol);
-        }
-        var kr = R(cx - r, cy - r, 2 * r, 2 * r);
-        g.FillEllipse(Gradient(kr, Rgb(0x3A, 0x3F, 0x47), Rgb(0x0B, 0x0C, 0x0E), 70), kr);
-        g.DrawEllipse(Pen(Rgb(0x5A, 0x61, 0x6B), 2), kr);
-        var inner = R(cx - r + 10, cy - r + 10, 2 * r - 20, 2 * r - 20);
-        g.FillEllipse(Gradient(inner, Rgb(0x23, 0x27, 0x2D), Rgb(0x14, 0x16, 0x1A), 250), inner);
-        double a = (135 + 270 * vol) * Math.PI / 180;
-        double px = cx + Math.Cos(a) * (r - 16), py = cy + Math.Sin(a) * (r - 16);
-        g.FillEllipse(Brush(muted ? Grey : lit), px - 3.5, py - 3.5, 7, 7);
-        _hits.Add(new Hit(R(cx - r - 12, cy - r - 12, 2 * r + 24, 2 * r + 24), "knob", null));
+    /// <summary>A slow blink for things that are promised but not here yet: a short flash every 1.6 s.</summary>
+    private static bool Blink => DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond % 1600 < 400;
 
-        g.Label("HD CH", 10, lit, R(200, 196, 52, 14), Align.Center, bold: true);
-        g.Label("DISP", 10, lit, R(142, 196, 52, 14), Align.Center, bold: true);
-        Key(g, R(200, 212, 52, 22), "band", NextProgram);
-        Key(g, R(142, 212, 52, 22), "disp", NextDisplay);
+    /// <summary>OPEN: flips the faceplate down (where a head unit has its open/eject key).</summary>
+    private void OpenKey(DrawingContext g, Rect r, Color lit)
+    {
+        Key(g, r, "open", ToggleOpen);
+        var b = Brush(lit);
+        double cx = r.X + r.Width / 2, cy = r.Y + 20;
+        g.FillPolygon(b, new Point(cx - 8, cy + 2), new Point(cx + 8, cy + 2), new Point(cx, cy - 6));
+        g.FillRect(b, cx - 8, cy + 5, 16, 2.2);
+        g.Label(_open ? "CLOSE" : "OPEN", 9.5, lit, R(r.X, r.Y + 39, r.Width, 12), Align.Center, bold: true);
+    }
+
+    /// <summary>HD SEEK: seek stops only at HD stations while this is lit.</summary>
+    private void HdSeekKey(DrawingContext g, Rect r, Color lit)
+    {
+        bool on = _c.Settings.SeekHd;
+        TwoLineKey(g, r, "hdseek", "HD", "SEEK", on ? lit : Grey,
+            () => { _c.SetSeekHd(!_c.Settings.SeekHd); Flash(_c.Settings.SeekHd ? "SEEK HD ONLY" : "SEEK ALL", 1.5); });
     }
 
     private void HdPages()
@@ -600,13 +609,18 @@ internal sealed class FaceplateControl : Control
         x = StereoIcon(g, x, 172, stereo, lit);
         bool rdsOn = rds?.Synced == true;
         x = Indicator(g, x, 172, "RDS", rdsOn, rdsOn, lit) + 10;
+        // [HD][SEEK]: a fixed pair; both light during an HD-only seek, SEEK alone during a plain one
+        bool hdSeeking = _c.Seeking && _c.Settings.SeekHd;
+        x = Indicator(g, x, 172, "HD", hdSeeking, hdSeeking, lit) - 3;
         x = Indicator(g, x, 172, "SEEK", _c.Seeking, _c.Seeking, lit) + 10;
-        bool wx = hd?.WeatherMap != null, trf = hd != null && hd.TrafficTiles.Any(t => t != null);
-        double wxEnd = Indicator(g, x, 172, "WX", wx, false, lit);
-        if (wx) _hits.Add(new Hit(R(x - 2, 168, wxEnd - x, 22), "wx", () => MapRequested?.Invoke("weather")));
+        // WX / TRAFFIC: blinking outline while the station's guide promises the images, filled once one is here
+        int wxState = MapState("weather"), trfState = MapState("traffic");
+        bool blink = Blink;
+        double wxEnd = Indicator(g, x, 172, "WX", wxState == 2 || (wxState == 1 && blink), wxState == 2, lit);
+        _hits.Add(new Hit(R(x - 2, 168, wxEnd - x, 22), "wx", () => OpenMap("weather")));
         x = wxEnd;
-        double trfEnd = Indicator(g, x, 172, "TRAFFIC", trf, false, lit);
-        if (trf) _hits.Add(new Hit(R(x - 2, 168, trfEnd - x, 22), "trf", () => MapRequested?.Invoke("traffic")));
+        double trfEnd = Indicator(g, x, 172, "TRAFFIC", trfState == 2 || (trfState == 1 && blink), trfState == 2, lit);
+        _hits.Add(new Hit(R(x - 2, 168, trfEnd - x, 22), "trf", () => OpenMap("traffic")));
 
         // the HD programs mini matrix
         {
@@ -656,6 +670,8 @@ internal sealed class FaceplateControl : Control
                 DotMatrix.Draw(g, DotMatrix.Columns(""), 0, mx, my, pitch, HdCells, lit, ghost, glow: false);
             }
         }
+
+        DrawSignalMeter(g, lit);
 
         // art square: album art / station logo (click to enlarge), else the audio spectrum analyzer; while muted, MUTE
         var sq = AnalyzerArea;
@@ -780,6 +796,33 @@ internal sealed class FaceplateControl : Control
         return x + 2 + 2 * d - overlap + 8;
     }
 
+    /// <summary>A map's state: 0 the station doesn't send it, 1 promised by its service guide but not here yet, 2 received.</summary>
+    private int MapState(string which)
+    {
+        var hd = _c.Engine?.Hd;
+        if (hd == null) return 0;
+        bool have = which == "weather" ? hd.WeatherMap != null : hd.TrafficTiles.Any(t => t != null);
+        return have ? 2 : hd.HereImages ? 1 : 0;
+    }
+
+    /// <summary>Opens a map, or says on the display why there is none.</summary>
+    private void OpenMap(string which)
+    {
+        int state = MapState(which);
+        string name = which == "weather" ? "WX" : "TRAFFIC";
+        if (state == 2) MapRequested?.Invoke(which);
+        else Flash(state == 1 ? $"{name} PENDING" : $"NO {name} HERE", 1.5);
+    }
+
+    /// <summary>A key for a map, lit like its indicator: dark text until the station promises the map, blinking until it's here, lit then.</summary>
+    private void MapKey(DrawingContext g, Rect r, string id, string label, string which)
+    {
+        int state = MapState(which);
+        Key(g, r, id, () => OpenMap(which));
+        var c = state == 2 ? Lit : Grey;   // grey until a map is here (the display's light blinks while one is promised)
+        g.Label(label, 11, c, R(r.X, r.Y + (r.Height - 16) / 2, r.Width, 16), Align.Center, bold: true);
+    }
+
     private double Indicator(DrawingContext g, double x, double y, string text, bool on, bool active, Color lit, Color? onColor = null)
     {
         double w = TextWidth(text, 10.5, bold: true) + 10;
@@ -858,45 +901,72 @@ internal sealed class FaceplateControl : Control
     private void DrawRightSide(DrawingContext g)
     {
         var lit = Lit;
-        var slot = R(928, 58, 34, 116);
+        DrawTuneKnob(g, lit);
+        DrawVolumeKnob(g, lit);
+    }
+
+    /// <summary>
+    /// The signal meter, inside the display under the art square: an antenna, five dots and an OVL light (fixed
+    /// elements, like the rest of the LCD). The quality of what you're hearing: HD MER while HD plays, else the FM
+    /// stereo pilot's SNR (channel power for a mono station); OVL lights red when the dongle's ADC clips.
+    /// </summary>
+    private void DrawSignalMeter(DrawingContext g, Color lit)
+    {
         var eng = _c.Engine;
         bool overload = eng?.GainOptimizer.Overload == true;
-        g.FillRounded(Brush(Rgb(0x06, 0x07, 0x09)), slot, 8);
-        g.DrawRounded(Pen(overload ? Alert : lit, overload ? 2.4 : 1.6), slot, 8);
-        if (overload) g.Label("OVL", 9, Alert, R(slot.X, slot.Y + 2, slot.Width, 12), Align.Center, bold: true);
         double q = 0;
         if (eng != null)
         {
             var hd = eng.Hd;
             var st = eng.Receiver.Stereo;
+            // HD MER 3..18 dB; pilot SNR 10..45 dB (strong stations 35-50, weak ~15); power -52..-12 dBFS
             q = eng.Blender.PlayingHd ? Math.Clamp(((hd.MerLower + hd.MerUpper) / 2 - 3) / 15, 0, 1)
               : st.PilotLocked ? Math.Clamp((st.PilotSnrDb - 10) / 35, 0, 1)
               : Math.Clamp((eng.Receiver.ChannelPowerDb + 52) / 40, 0, 1);
         }
-        int segs = 10;
-        for (int s = 0; s < segs; s++)
+        double x = 812, y = 180, ax = x + 9;
+        var pen = Pen(lit, 1.3, round: true);
+        g.DrawLine(pen, ax, y - 4, ax, y + 7);
+        g.DrawLine(pen, ax - 3, y + 7, ax + 3, y + 7);
+        g.FillEllipse(Brush(lit), ax - 1.4, y - 5.4, 2.8, 2.8);
+        foreach (double r in new[] { 4.0, 7.0 })
         {
-            bool on = s < Math.Round(q * segs);
-            g.FillRect(Brush(on ? lit : lit.With(22)), slot.X + 9, slot.Bottom - 10 - (s + 1) * 9.4, slot.Width - 18, 6.5);
+            g.DrawArc(pen, ax - r, y - 4 - r, 2 * r, 2 * r, 150, 60);
+            g.DrawArc(pen, ax - r, y - 4 - r, 2 * r, 2 * r, -30, 60);
         }
-        // the antenna legend under the slot
-        {
-            var c = (overload ? Alert : lit).With(overload ? 255 : 200);
-            var pen = Pen(c, 1.4, round: true);
-            double ax = slot.X + slot.Width / 2, top = slot.Bottom + 6;
-            g.DrawLine(pen, ax, top + 3, ax, top + 15);
-            g.DrawLine(pen, ax - 3.5, top + 15, ax + 3.5, top + 15);
-            g.FillEllipse(Brush(c), ax - 1.6, top + 1.4, 3.2, 3.2);
-            foreach (double r in new[] { 5.0, 9.0 })
-            {
-                g.DrawArc(pen, ax - r, top + 3 - r, 2 * r, 2 * r, 150, 60);
-                g.DrawArc(pen, ax - r, top + 3 - r, 2 * r, 2 * r, -30, 60);
-            }
-        }
-        DrawTuneKnob(g, lit);
+        int on = (int)Math.Round(q * 5);
+        for (int i = 0; i < 5; i++) g.FillEllipse(Brush(i < on ? lit : lit.With(28)), x + 24 + i * 9, y - 3, 6, 6);
+        g.Label("OVL", 8.5, overload ? Alert : lit.With(28), R(x + 68, y - 7, 26, 14), Align.Center, bold: true);
     }
 
-    private const double TuneCx = 945, TuneCy = 233, TuneR = 21, DetentDeg = 15;
+    // the volume knob, in the corner under the tuning knob: its light ring shows the level
+    private const double VolCx = 945, VolCy = 239, VolR = 21;
+
+    private void DrawVolumeKnob(DrawingContext g, Color lit)
+    {
+        float vol = _c.Settings.Volume;
+        bool muted = _c.Settings.Muted;
+        var ring = R(VolCx - VolR - 5, VolCy - VolR - 5, 2 * (VolR + 5), 2 * (VolR + 5));
+        g.DrawArc(Pen(lit.With(40), 3), ring, 135, 270);
+        if (vol > 0.001f)
+        {
+            var c = muted ? Grey : lit;
+            g.DrawArc(Pen(c.With(60), 7, round: true), ring, 135, 270 * vol);
+            g.DrawArc(Pen(c, 2.5, round: true), ring, 135, 270 * vol);
+        }
+        var kr = R(VolCx - VolR, VolCy - VolR, 2 * VolR, 2 * VolR);
+        bool hot = _hover == "knob" || _knobDrag;
+        g.FillEllipse(Gradient(kr, Rgb(0x3A, 0x3F, 0x47), Rgb(0x0B, 0x0C, 0x0E), 70), kr);
+        g.DrawEllipse(Pen(hot ? lit.With(160) : Rgb(0x5A, 0x61, 0x6B), hot ? 1.8 : 1.5), kr);
+        var cap = Inflate(kr, -6, -6);
+        g.FillEllipse(Gradient(cap, Rgb(0x23, 0x27, 0x2D), Rgb(0x14, 0x16, 0x1A), 250), cap);
+        double a = (135 + 270 * vol) * Math.PI / 180;
+        g.FillEllipse(Brush(muted ? Grey : lit), VolCx + Math.Cos(a) * (VolR - 10) - 2.5, VolCy + Math.Sin(a) * (VolR - 10) - 2.5, 5, 5);
+        g.Label("VOL", 8.5, lit, R(VolCx - 20, VolCy + VolR + 2, 40, 11), Align.Center, bold: true);
+        _hits.Add(new Hit(R(VolCx - VolR - 8, VolCy - VolR - 8, 2 * VolR + 16, 2 * VolR + 16), "knob", null));
+    }
+
+    private const double TuneCx = 945, TuneCy = 145, TuneR = 21, DetentDeg = 15;
 
     private void DrawTuneKnob(DrawingContext g, Color lit)
     {
@@ -915,8 +985,6 @@ internal sealed class FaceplateControl : Control
         g.DrawEllipse(Pen(hot ? lit.With(160) : Rgb(0x5A, 0x61, 0x6B), hot ? 1.8 : 1.5), kr);
         var cap = Inflate(kr, -6, -6);
         g.FillEllipse(Gradient(cap, Rgb(0x23, 0x27, 0x2D), Rgb(0x14, 0x16, 0x1A), 250), cap);
-        double px = TuneCx + Math.Cos(turn - Math.PI / 2) * (TuneR - 10), py = TuneCy + Math.Sin(turn - Math.PI / 2) * (TuneR - 10);
-        g.FillEllipse(Brush(lit), px - 2.5, py - 2.5, 5, 5);
         g.Label("TUNE", 8.5, lit, R(TuneCx - 20, TuneCy + TuneR + 2, 40, 11), Align.Center, bold: true);
         _hits.Add(new Hit(Inflate(kr, 6, 6), "tuneknob", () => _c.Seek(1)));
     }
@@ -1183,7 +1251,7 @@ internal sealed class FaceplateControl : Control
         if (d == 0) return;
         e.Handled = true;
         var now = DateTime.UtcNow;
-        if (p.X < 268 && !_open)   // over the knob side: volume (panel open: the wheel tunes everywhere)
+        if (p.X > 915 && !_open)   // over the knobs on the right: volume (panel open: the wheel tunes everywhere)
         {
             SetVolume(_c.Settings.Volume + (float)(d * 0.025));
             InvalidateVisual();

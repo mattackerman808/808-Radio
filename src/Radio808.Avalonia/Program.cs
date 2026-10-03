@@ -14,7 +14,7 @@ internal static class Program
         AppDomain.CurrentDomain.UnhandledException += (_, e) => AppLog.Write(e.ExceptionObject?.ToString() ?? "unknown error");
         if (args.Length >= 2 && args[0] == "--mvtdump")   // development: what's in a cached vector tile
         {
-            var tile = Map.MvtTile.Decode(System.IO.File.ReadAllBytes(args[1]));
+            var tile = Radio808.Shared.Map.MvtTile.Decode(System.IO.File.ReadAllBytes(args[1]));
             foreach (var l in tile.Layers)
             {
                 Console.WriteLine($"layer {l.Name}: {l.Features.Count} features, extent {l.Extent}, keys: {string.Join(" ", l.Keys)}");

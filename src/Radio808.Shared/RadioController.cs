@@ -223,7 +223,7 @@ public sealed class RadioController : IDisposable
         if (Seeking) { CancelSeek(); return; }   // pressing seek again stops it
         var cts = _seekCts = new CancellationTokenSource();
         Changed?.Invoke();
-        try { await Engine.SeekAsync(direction, cts.Token); }
+        try { await Engine.SeekAsync(direction, Settings.SeekHd, cts.Token); }
         finally
         {
             if (_seekCts == cts) _seekCts = null;
@@ -310,6 +310,14 @@ public sealed class RadioController : IDisposable
         if (Engine != null) Engine.Equalizer = on;
     }
 
+    /// <summary>Seek stops only at HD stations (it waits a few seconds on each analog station for HD sync).</summary>
+    public void SetSeekHd(bool on)
+    {
+        Settings.SeekHd = on;
+        Settings.Save();
+        Changed?.Invoke();
+    }
+
     public void SetForceMono(bool on)
     {
         Settings.ForceMono = on;
@@ -342,6 +350,7 @@ public sealed class RadioController : IDisposable
     /// </summary>
     public void PpmTick()
     {
+        Map.MapCache.Tick(Engine?.Hd?.WeatherBounds);   // the once-a-second hook both apps call: the map cache rides on it
         var eng = Engine;
         if (eng == null || !Settings.AutoPpm || _ppmDone || Seeking) return;
         if (eng.MeasuredPpmError is not double err) return;

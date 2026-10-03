@@ -31,6 +31,10 @@ public sealed class HdStatus
     public MapBounds? TrafficBounds;
     /// <summary>The last HERE image's header, for the record: name, part numbers, corners.</summary>
     public string? LastHereInfo;
+    /// <summary>The station's Service Information Guide advertises the HERE image service (weather radar and traffic maps), so they're coming.</summary>
+    public bool HereImages;
+    /// <summary>The data services the guide lists, by content, for the panel (e.g. "HERE images, TTN traffic").</summary>
+    public string? DataServices;
     /// <summary>The file name each traffic tile came with (same order as <see cref="TrafficTiles"/>).</summary>
     public string?[] TrafficNames = new string?[9];
     /// <summary>Audio programs seen (0 = HD1), with their program type name.</summary>
@@ -278,6 +282,9 @@ public sealed unsafe class HdDecoder : IDisposable
                 case Nrsc5Native.EventId3:
                     OnId3(e);
                     break;
+                case Nrsc5Native.EventSig:
+                    OnSig(e);
+                    break;
                 case Nrsc5Native.EventLot:
                     OnLot(e);
                     break;
@@ -348,6 +355,43 @@ public sealed unsafe class HdDecoder : IDisposable
             if (album != null) s.Album = album;
             if (art != null) s.AlbumArt = art;
         });
+    }
+
+    /// <summary>
+    /// The Service Information Guide: every service on the station with its components. The data components'
+    /// content types say what the station sends besides audio, in particular whether the HERE image service
+    /// (weather radar and traffic maps) is there, well before its first image arrives.
+    /// </summary>
+    private void OnSig(IntPtr e)
+    {
+        var names = new SortedSet<string>();
+        bool here = false;
+        for (var service = Nrsc5Native.Ptr(e, 8); service != IntPtr.Zero; service = Nrsc5Native.Ptr(service, 0))
+        {
+            // nrsc5_sig_service_t: next, type (byte 8), number (16-bit at 10), name (pointer at 16), components (24)
+            for (var comp = Nrsc5Native.Ptr(service, 24); comp != IntPtr.Zero; comp = Nrsc5Native.Ptr(comp, 0))
+            {
+                // nrsc5_sig_component_t: next, type (byte 8), id (9), then for data: port (16-bit at 12), service data type (14), type (16), mime (20)
+                if (Marshal.ReadByte(comp, 8) != Nrsc5Native.SigComponentData) continue;
+                uint mime = Nrsc5Native.U32(comp, 20);
+                string? label = mime switch
+                {
+                    Nrsc5Native.MimeHereImage => "HERE images",
+                    Nrsc5Native.MimeHereTpeg => "HERE TPEG",
+                    Nrsc5Native.MimeNavteq => "Navteq",
+                    Nrsc5Native.MimeHdTmc => "TMC",
+                    Nrsc5Native.MimeTtnTpeg1 or Nrsc5Native.MimeTtnTpeg2 or Nrsc5Native.MimeTtnTpeg3 => "TTN TPEG",
+                    Nrsc5Native.MimeTtnStmTraffic => "TTN traffic",
+                    Nrsc5Native.MimeTtnStmWeather => "TTN weather",
+                    Nrsc5Native.MimePrimaryImage or Nrsc5Native.MimeStationLogo => null,   // album art and logos: audio-related, not a data service
+                    _ => Marshal.ReadByte(service, 8) == Nrsc5Native.SigServiceData ? $"data {mime:X8}" : null,
+                };
+                if (mime == Nrsc5Native.MimeHereImage) here = true;
+                if (label != null) names.Add(label);
+            }
+        }
+        string? list = names.Count == 0 ? null : string.Join(", ", names);
+        Update(s => { s.HereImages = here; s.DataServices = list; });
     }
 
     private void OnLot(IntPtr e)
