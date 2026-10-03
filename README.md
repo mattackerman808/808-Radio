@@ -10,8 +10,9 @@
 art, multicast channels (HD1–HD8), weather and traffic maps, blended with the analog signal like a real HD receiver.
 It finds the best gain for each station by itself and corrects the dongle's frequency error automatically.
 
-Flip the faceplate down (the ▲ key) and there's an instrument panel behind it, drawn on the GPU at your display's
-refresh rate: spectrum and waterfall with click-to-tune, the FM multiplex, and live signal statistics.
+Press **OPEN** and the faceplate flips down to an instrument panel behind it, drawn at your display's refresh rate:
+spectrum and waterfall with click-to-tune, the FM multiplex, and live signal statistics. Tune a station that sends
+the HD weather service and **WX** opens its radar over a street map, which is cached so it works offline too.
 
 ![The instrument panel behind the faceplate](docs/images/808radio-open.png)
 
@@ -36,7 +37,7 @@ for building and status. No driver is needed for a USB dongle on macOS.
   *Bulk-In, Interface (Interface 0)*, select *WinUSB*, *Replace Driver*. If SDR# or another SDR program already works
   with the dongle, this is done.
 - An FM antenna. Only one program can use the dongle at a time, so close SDR# etc. first.
-- Windows 10 or 11, x64.
+- Windows 10 or 11 (x64), or macOS on Apple Silicon.
 
 **Or a network dongle:** plug the dongle into a Raspberry Pi near the antenna, run the standard `rtl_tcp` server there
 (one-line setup script); 808 Radio finds it on the network by itself (mDNS) and lists it under *Source*. See
@@ -56,9 +57,9 @@ anywhere, though the tuning grid, de-emphasis and program types are US defaults 
 | **SRC** | HD (automatic blend) or analog FM only (A) |
 | **HD CH** | next HD program: HD1, HD2 … (H); or click a number in the display's `HD 1 2 3` |
 | **DISP** | what the two display lines show: song / station, station / song, station / genre, artist / title, frequency / station (D) |
-| **Bulb key** | illumination color (C): cyan, amber, green, red, blue, white |
+| **COLOR** | illumination color (C): cyan, amber, green, red, blue, white |
 | **OPEN** | flip the faceplate down to the instrument panel (O) |
-| **WX** / **TRAFFIC** | the weather radar and traffic maps, when the station sends them (the keys light up as described below) |
+| **WX** / **TRAFFIC** | the weather radar (over a street map) and the traffic mosaic, when the station sends them (the keys light up as described below) |
 | **Right-click** | source (USB or network dongle), gain, frequency correction, antenna power (bias-tee), album art, panel frame rate, always on top, … |
 
 Drag the faceplate to move it; drag its edges to resize. The display has a large dot-matrix line and a small one with
@@ -67,8 +68,8 @@ frequency / station; long text scrolls). Below them is a row of fixed status lig
 station's HD programs (`HD 1 2 3`: the one you're hearing is lit, the one you've chosen blinks while it locks in;
 choose with **HD CH** or click a number). The lights: **HD** (outlined: found; filled: you're hearing
 the digital audio), **WEAK** in red (HD found, with its station name and programs, but the signal is too poor to play
-its audio, so you hear the analog), the stereo rings, **RDS**, **SEEK** (**HD SEEK** when seek is set to stop only at
-HD stations, in the right-click menu), **WX** / **TRAFFIC** (the weather radar and traffic maps: dark on stations
+its audio, so you hear the analog), the stereo rings, **RDS**, **HD** **SEEK** (SEEK while seeking; both while an
+HD-only seek runs), **WX** / **TRAFFIC** (the weather radar and traffic maps: dark on stations
 that don't send them, blinking once the station's service guide says they're coming, lit when one has arrived; open
 them with the **WX** and **TRAFFIC** keys left of the display, or click the light). The preset you're on is outlined in
 the row of preset keys. The antenna with five dots at the right end of that row is the signal meter: the reception
@@ -78,10 +79,20 @@ The square at the right of the display shows the HD album art or station logo (c
 song and station), or else an old-school audio spectrum analyzer; right-click → *Album art on the display* to always
 have the analyzer.
 
-In the instrument panel, click a station in the spectrum or waterfall to tune it (the view slides it to the center),
-and scroll to step. **SPAN** switches between the dongle's full 1.5 MHz and the 744 kHz HD baseband.
+**The weather map.** Stations that carry the HD Radio traffic and weather service (a few per market) send a radar
+image with its map corners every few minutes, and nine traffic tiles. **WX** draws the radar over a street map of the
+same box (OpenStreetMap data from Swiftcamp's basemap archive), with the time it was received; **TRAFFIC** shows the
+tiles as a mosaic that fills in as they arrive. As soon as a station's weather box is known, the map tiles it needs
+are fetched and kept, so the map works without the internet afterwards; the archive is checked for updates daily.
 
-Settings are saved in `%APPDATA%\808Radio\settings.json`; errors go to `808Radio.log` in the same folder.
+![The weather radar over its street map](docs/images/808radio-weather.png)
+
+In the instrument panel, click a station in the spectrum or waterfall to tune it (the view slides it to the center),
+and scroll to step. **SPAN** switches between the dongle's full 1.5 MHz and the 744 kHz HD baseband. The HD RADIO
+section lists the data services the station advertises (e.g. `HERE images`).
+
+Settings are saved in `%APPDATA%\808Radio\settings.json` (`~/Library/Application Support/808Radio` on the Mac),
+with `808Radio.log` and the map cache (`maps/`) in the same folder.
 
 ## Features
 
@@ -97,10 +108,12 @@ Settings are saved in `%APPDATA%\808Radio\settings.json`; errors go to `808Radio
   (or stereo pilot SNR), with guards that drop the gain the moment the front end overloads.
 - **Automatic frequency correction**: a broadcaster's carrier is crystal-accurate, so the FM discriminator's average
   is the dongle's own tuning error; corrections of 1.5 ppm or more are applied and saved.
+- **Weather radar on a map**: the station's radar image over a street map of the same box, cached for use offline;
+  the station's service guide says up front whether it sends maps. **HD-only seek** skips analog-only stations.
 - **Network dongle**: the RTL-SDR can be on a Raspberry Pi by the antenna, running `rtl_tcp`; 808 Radio finds it on
   the network (mDNS) — see [docs/raspberry-pi.md](docs/raspberry-pi.md).
-- **Smooth instrument panel**: Direct2D on its own render thread, presented with the display (right-click → *Panel
-  frame rate*); GDI+ if there's no GPU.
+- **Smooth instrument panel**: on Windows, Direct2D on its own render thread, presented with the display (right-click
+  → *Panel frame rate*), GDI+ if there's no GPU; on the Mac, Avalonia's Skia compositor.
 
 ## How it works
 
@@ -117,13 +130,14 @@ timeline:
 | Stereo decoder ÷4 | 46,512 | pilot PLL, L−R demodulation, blend, de-emphasis |
 | Resampler | 48,000 | trimmed by a PI loop on the output buffer to absorb dongle/soundcard clock drift |
 
-Audio goes out through WASAPI and follows the Windows default device. nrsc5's HD stereo comes out mirrored relative to
+Audio goes out through WASAPI on Windows (following the default device) and CoreAudio (miniaudio) on the Mac. nrsc5's
+HD stereo comes out mirrored relative to
 the analog on every station tested (likely a parametric-stereo sign convention in its HDC decoder), so it's swapped
 back.
 
 ## Building from source
 
-Requirements (all free): the [.NET 9 SDK](https://dotnet.microsoft.com/download) (`winget install
+On the Mac, see [docs/mac-port.md](docs/mac-port.md). On Windows, requirements (all free): the [.NET 9 SDK](https://dotnet.microsoft.com/download) (`winget install
 Microsoft.DotNet.SDK.9`) and [MSYS2](https://www.msys2.org/) (`winget install MSYS2.MSYS2`) for the native libraries.
 
 ```
@@ -163,6 +177,9 @@ settings untouched, beside a normal copy) and writes paint timings per section.
 - [librtlsdr](https://gitea.osmocom.org/sdr/rtl-sdr) (osmocom) and [libusb](https://libusb.info/): dongle access
 - [NAudio](https://github.com/naudio/NAudio): WASAPI output
 - [Vortice.Windows](https://github.com/amerkoleci/Vortice.Windows): Direct2D on the GPU for the instrument panel
+- [Avalonia](https://avaloniaui.net/) and [miniaudio](https://miniaud.io/): the Mac app's UI and audio output
+- [Swiftcamp](https://swiftcamp.app/)'s basemap archive ([Protomaps](https://protomaps.com/) schema, © OpenStreetMap
+  contributors, ODbL): the street map under the weather radar
 - Sister project: [808 HD](https://github.com/mattackerman808/808-HD), an HD Radio plugin for SDR#
 
 ## License

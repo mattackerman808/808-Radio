@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.0 (2026-10-03)
+
+- **The weather map on Windows.** The HD weather radar is drawn over a street map of the same box on both
+  platforms now; the map code (Swiftcamp's basemap archive, the vector tile decoder, the style) moved to the
+  shared project, with Avalonia and GDI+ each drawing it.
+- **The map works offline.** As soon as a station's weather box is known, every map tile it could need is
+  fetched and kept (a few dozen), so the radar has its street map without the internet. The archive is checked
+  for updates once a day; a failed fetch is retried every five minutes.
+- **The station tells you what it sends.** The HD decoder reads the Service Information Guide, so WX and TRAFFIC
+  show as soon as a station is tuned: dark where there are no maps, blinking in the display once the station
+  promises them, lit when the first one arrives (the panel lists the station's data services).
+- **HD-only seek.** The HD SEEK key (also in the menu): seek skips analog-only stations, waiting a few seconds on
+  each for HD sync. The display's [HD][SEEK] lights show it at work.
+- **A new faceplate layout.** Nine same-size keys left of the display in three rows: OPEN, DISP, COLOR / MUTE, WX,
+  TRAFFIC / SRC, HD CH, HD SEEK. The tune knob sits above a tune-sized volume knob in the corner. The signal
+  meter moved into the display as an antenna with five dots and an OVL light. The brand reads "808 Radio" at the
+  left and a DIGITAL badge sits at the right.
+- Development: `--mapsnap` fills the map cache like the app does.
+
 ## 0.6.1 (2026-10-03)
 
 - **Resizing works on the Mac.** Dragging the faceplate's edges did nothing: Avalonia's macOS backend has no
