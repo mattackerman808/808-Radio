@@ -2,7 +2,7 @@
 
 # 808 Radio
 
-**An FM + HD Radio receiver for Windows and RTL-SDR dongles, styled as a car stereo.**
+**An FM + HD Radio receiver for Windows and macOS with RTL-SDR dongles, styled as a car stereo.**
 
 ![808 Radio](docs/images/808radio.png)
 
@@ -19,6 +19,13 @@ refresh rate: spectrum and waterfall with click-to-tune, the FM multiplex, and l
 
 **[Latest release](https://github.com/mattackerman808/808-Radio/releases/latest)**: unzip `808Radio-vX.Y.Z-win-x64.zip`
 anywhere and run `808Radio.exe`. It's self-contained: no installer, no .NET install.
+
+## macOS
+
+The same radio runs on the Mac (Apple Silicon): the faceplate and the instrument panel, a USB dongle or the network
+dongle on a Raspberry Pi, and on top of what Windows has, the HD weather radar drawn over a street map. It's built
+with Avalonia from `src/Radio808.Avalonia`; the receiver is the same code. See [docs/mac-port.md](docs/mac-port.md)
+for building and status. No driver is needed for a USB dongle on macOS.
 
 ## Hardware
 
