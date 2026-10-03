@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.1 (2026-10-03)
+
+- **Resizing works on the Mac.** Dragging the faceplate's edges did nothing: Avalonia's macOS backend has no
+  system resize drag for a frameless window. The window now follows the pointer itself, keeping the faceplate's
+  shape; a left or top edge keeps the opposite edge in place.
+- **Crisp dots on non-Retina monitors.** The HD programs strip smeared on a 1x display, where its dots were under
+  two pixels across. Dots under three pixels of pitch are drawn pixel-aligned on a whole-pixel pitch (Mac app).
+- **No analyzer ghost over the panel.** The audio analyzer square stayed on screen when the faceplate folded down
+  (and over album art or MUTE); it's hidden when it isn't live. Closing the panel no longer leaves the window tall.
+- Development: `R808_SNAP_SCALE=1` renders `--snapshot` at 1x, as a non-Retina monitor shows it.
+
 ## 0.6.0 (2026-10-03)
 
 - **808 Radio for macOS** (Apple Silicon): the faceplate, the flip-down instrument panel, the right-click menu and
