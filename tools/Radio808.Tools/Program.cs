@@ -23,6 +23,7 @@ internal static class Program
                 case "capture": return Capture(Mhz(args, 1, 97.3), double.Parse(args[2]), args[3], args.Length > 4 ? double.Parse(args[4]) : null);
                 case "spectrum": return Spectrum(args[1]);
                 case "scan": return Scan(args.Length > 1 ? double.Parse(args[1]) : double.NaN);
+                case "overload": return OverloadScan.Run(args.Length > 1 ? double.Parse(args[1]) : null);
                 case "fm": return FmTools.Offline(args[1], args[2], args.Length > 3 ? int.Parse(args[3]) : 48_000);
                 case "snr": return AudioCompare.Snr(args[1], args[2]);
                 case "gaintest": return FmTools.GainTest(Mhz(args, 1, 97.3));
@@ -142,7 +143,9 @@ internal static class Program
     private static int Scan(double gainDb)
     {
         const int N = 4096;
-        using var dev = Open(88.6);
+        var net = Environment.GetEnvironmentVariable("R808_RTLTCP");   // a network dongle, as for play
+        using IIqSource dev = net is { Length: > 0 } ? new RtlTcpSource(net) : Open(88.6);
+        if (net is { Length: > 0 }) { dev.SampleRate = SampleRate; dev.Frequency = 88_600_000; }
         if (!double.IsNaN(gainDb)) dev.Gain = gainDb;
         Console.WriteLine($"gain: {(double.IsNaN(gainDb) ? "auto" : gainDb + " dB")}");
         var power = new System.Collections.Generic.Dictionary<int, double>();   // channel (kHz) -> power
