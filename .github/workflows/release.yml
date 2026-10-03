@@ -57,7 +57,7 @@ jobs:
             rtl-sdr/build-mac
           key: native-mac-${{ runner.arch }}-${{ hashFiles('native/mac/build-native-mac.sh', 'native/mac/r808audio.c', 'native/mac/miniaudio.h', '.gitmodules') }}-${{ hashFiles('.git/modules/nrsc5/HEAD', '.git/modules/rtl-sdr/HEAD') }}
       - name: Signing identity and notarization credentials
-        if: ${{ env.MAC_SIGN_P12 != '' }}
+        if: ${{ secrets.MAC_SIGN_P12 != '' }}
         env:
           MAC_SIGN_P12: ${{ secrets.MAC_SIGN_P12 }}
           MAC_SIGN_PASSWORD: ${{ secrets.MAC_SIGN_PASSWORD }}
