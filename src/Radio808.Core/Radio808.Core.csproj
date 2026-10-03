@@ -1,9 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0-windows</TargetFramework>
-    <Platforms>x64</Platforms>
-    <PlatformTarget>x64</PlatformTarget>
+    <!-- net9.0-windows: WASAPI audio (the Windows app); net9.0: miniaudio / CoreAudio (macOS, and the tools there) -->
+    <TargetFrameworks>net9.0;net9.0-windows</TargetFrameworks>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>Radio808.Core</RootNamespace>
@@ -13,13 +12,17 @@
     <InternalsVisibleTo Include="Radio808.Tools" />
   </ItemGroup>
 
-  <!-- Native DLLs built by build-native.sh -->
+  <!-- Native libraries: native/bin/*.dll from build-native.sh (Windows), native/bin/*.dylib from native/mac/build-native-mac.sh -->
   <ItemGroup>
-    <None Include="..\..\native\bin\*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+    <None Include="..\..\native\bin\*.dll;..\..\native\bin\*.dylib" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
-  <ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0-windows'">
     <PackageReference Include="NAudio.Core" Version="3.1.0" />
     <PackageReference Include="NAudio.Wasapi" Version="3.1.0" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' != 'net9.0-windows'">
+    <Compile Remove="Audio\WasapiAudioDevice.cs" />
   </ItemGroup>
 
 </Project>

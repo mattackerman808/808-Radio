@@ -36,7 +36,9 @@ internal static class Program
                 case "netlatency": return NetTools.Latency(args[1], Mhz(args, 2, 98.5));
                 case "discover": return NetTools.Discover(args.Length > 1 ? double.Parse(args[1]) : 2);
                 case "analyzer": return NetTools.AnalyzerStats(args[1]);
+#if WINDOWS
                 case "icon": return IconTool.Run(args[1]);
+#endif
                 case "ppmtest": return HdTools.PpmTest(Mhz(args, 1, 98.5));
                 case "ctlstress": return HdTools.ControlStress(args.Length > 1 ? double.Parse(args[1]) : 20);
                 case "gainsweep": return HdTools.GainSweep(Mhz(args, 1, 97.3), args.Length > 2 ? double.Parse(args[2]) : 2.5, args.Length > 3 ? double.Parse(args[3]) : 3);

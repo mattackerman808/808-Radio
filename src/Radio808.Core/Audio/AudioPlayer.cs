@@ -1,15 +1,12 @@
 using System;
 using System.Threading.Tasks;
-using NAudio.CoreAudioApi;
-using NAudio.Wave;
-using NAudio.Wave.SampleProviders;
 using Radio808.Core.Dsp;
 
 namespace Radio808.Core.Audio;
 
 /// <summary>
-/// Plays stereo audio through WASAPI (shared mode, the default output device). Audio written from the radio's clock
-/// domain is resampled to the output rate; the ratio is trimmed by a few hundred ppm to hold the buffer at its target
+/// Plays stereo audio through the system's default output device (WASAPI on Windows, CoreAudio on macOS; see
+/// <see cref="AudioDevice"/>). Audio written from the radio's clock domain is resampled to the output rate; the ratio is trimmed by a few hundred ppm to hold the buffer at its target
 /// level, which absorbs the drift between the dongle's crystal and the sound card's.
 /// </summary>
 public sealed class AudioPlayer : IDisposable
@@ -20,7 +17,7 @@ public sealed class AudioPlayer : IDisposable
     private readonly double _inRate;
     private readonly StereoResampler _resampler;
     private readonly Ring _ring;
-    private WasapiPlayer? _out;
+    private IAudioDevice? _out;
     private float[] _tmp = new float[0];
     private double _fillAvg = -1, _integ, _settle, _setpoint;
 
@@ -39,22 +36,15 @@ public sealed class AudioPlayer : IDisposable
         _ring = new Ring((int)(MaxMs / 1000 * OutputRate) * 2, (int)(TargetMs / 1000 * OutputRate) * 2, this);
     }
 
-    /// <summary>Opens the default output device; playback follows Windows when the default device changes.</summary>
+    /// <summary>Opens the default output device; playback follows the system when the default device changes.</summary>
     public static async Task<AudioPlayer> CreateAsync(double inputRate)
     {
         var p = new AudioPlayer(inputRate);
-        p._out = await new WasapiPlayerBuilder()
-            .WithDefaultDeviceStreamRouting()
-            .WithSharedMode()
-            .WithLatency(40)
-            .WithCategory(AudioStreamCategory.Media)
-            .BuildAsync().ConfigureAwait(false);
-        p._out.Init(new SampleToWaveProvider(p._ring));
-        p._out.Play();
+        p._out = await AudioDevice.OpenAsync(OutputRate, 2, p._ring.Read).ConfigureAwait(false);
         return p;
     }
 
-    public string DeviceName => _out?.DeviceFriendlyName ?? "";
+    public string DeviceName => _out?.DeviceName ?? "";
 
     /// <summary>Queues interleaved stereo audio at the input rate. Call from one thread.</summary>
     public void Write(ReadOnlySpan<float> stereo)
@@ -64,8 +54,8 @@ public sealed class AudioPlayer : IDisposable
         // (+-1000 ppm is under 2 cents of pitch: inaudible.)
         double dt = stereo.Length / 2 / _inRate;
         double fill = BufferedMs;
-        // The setpoint is the level the buffer settles at in the first 2 s (WASAPI keeps part of the audio in the
-        // device buffer, so it's below the priming level), so the loop only corrects drift, not startup.
+        // The setpoint is the level the buffer settles at in the first 2 s (the device keeps part of the audio in its
+        // own buffer, so it's below the priming level), so the loop only corrects drift, not startup.
         if (!_ring.Primed) { _settle = 0; _fillAvg = -1; }
         else if (_settle < 2.0)
         {
@@ -95,8 +85,8 @@ public sealed class AudioPlayer : IDisposable
         _out = null;
     }
 
-    /// <summary>Lock-protected ring buffer read by WASAPI. Starts silent until the target level is reached.</summary>
-    private sealed class Ring : ISampleProvider
+    /// <summary>Lock-protected ring buffer read by the audio device. Starts silent until the target level is reached.</summary>
+    private sealed class Ring
     {
         private readonly float[] _buf;
         private readonly int _target;
@@ -111,7 +101,6 @@ public sealed class AudioPlayer : IDisposable
             _owner = owner;
         }
 
-        public WaveFormat WaveFormat { get; } = WaveFormat.CreateIeeeFloatWaveFormat(OutputRate, 2);
         public int Count { get { lock (_lock) return _count; } }
         public bool Primed { get; private set; }
         public int Underruns { get; private set; }
@@ -130,7 +119,8 @@ public sealed class AudioPlayer : IDisposable
             }
         }
 
-        public int Read(Span<float> buffer)
+        /// <summary>Fills <paramref name="buffer"/> for the device: audio, or silence while starved.</summary>
+        public void Read(Span<float> buffer)
         {
             float gain = _owner.Muted ? 0 : _owner.Volume;
             int count = buffer.Length, n = 0;
@@ -149,7 +139,6 @@ public sealed class AudioPlayer : IDisposable
             }
             for (int i = 0; i < n; i++) buffer[i] *= gain;
             buffer.Slice(n).Clear();
-            return count;   // never end-of-stream: silence while starved
         }
     }
 }

@@ -2,8 +2,11 @@
 bin/
 obj/
 /dist/
-/native/
+/native/bin/
+/native/mac/prefix/
 /nrsc5/build/
+/nrsc5/build-mac/
+/rtl-sdr/build-mac/
 /rtl-sdr/build/
 
 # Recordings and test data

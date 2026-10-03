@@ -43,7 +43,12 @@ public sealed unsafe class RtlSdrDevice : IIqSource
     public static IReadOnlyList<RtlSdrInfo> Enumerate()
     {
         var list = new List<RtlSdrInfo>();
-        uint n = RtlSdrNative.rtlsdr_get_device_count();
+        uint n;
+        try { n = RtlSdrNative.rtlsdr_get_device_count(); }
+        catch (DllNotFoundException) when (!OperatingSystem.IsWindows())
+        {
+            return list;   // no librtlsdr on this platform yet (macOS): no USB dongles, so the app looks on the network
+        }
         for (uint i = 0; i < n; i++)
         {
             var (m, p, s) = RtlSdrNative.UsbStrings(i);
