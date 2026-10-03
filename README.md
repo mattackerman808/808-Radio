@@ -17,8 +17,9 @@ refresh rate: spectrum and waterfall with click-to-tune, the FM multiplex, and l
 
 ## Download
 
-**[Latest release](https://github.com/mattackerman808/808-Radio/releases/latest)**: unzip `808Radio-vX.Y.Z-win-x64.zip`
-anywhere and run `808Radio.exe`. It's self-contained: no installer, no .NET install.
+**[Latest release](https://github.com/mattackerman808/808-Radio/releases/latest)**: on Windows, unzip
+`808Radio-vX.Y.Z-win-x64.zip` anywhere and run `808Radio.exe`; on a Mac (Apple Silicon), unzip
+`808Radio-vX.Y.Z-mac-arm64.zip` and open `808 Radio.app`. Both are self-contained: no installer, no .NET install.
 
 ## macOS
 

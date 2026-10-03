@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0 (2026-10-03)
+
+- **808 Radio for macOS** (Apple Silicon): the faceplate, the flip-down instrument panel, the right-click menu and
+  the shortcuts, a USB dongle or the network dongle on a Raspberry Pi, with nothing to install: the download is a
+  signed and notarized app with the native libraries inside. The receiver and HD decoding are the same code as
+  Windows; the user interface is a port onto Avalonia. See `docs/mac-port.md`.
+- **Weather radar on a map** (macOS): the HD weather image is a radar layer whose map corners the broadcast gives,
+  so the Mac app draws it over a street map of the same box (OpenStreetMap data from the Swiftcamp basemap archive,
+  cached), with the time it was received. The traffic mosaic fills in live as its tiles arrive.
+- **Traffic tiles in the right places.** Tiles come as parts 1-9 in row-major order from the north-west corner
+  with 0-based row and column in their names; the 1-based parser put four of them in the wrong cell. Both platforms.
+- **The console tool** prints per-sideband HD MER, the bit error rate, the files and map images a station sends,
+  and saves them with `R808_SAVE_DIR`; it builds and runs on macOS (a USB dongle there needs no driver).
+- The settings and log live in `~/Library/Application Support/808Radio` on macOS; the controller, settings and log
+  moved to a shared project used by both apps. Start failures are logged with their reason.
+- **Releases are built by GitHub Actions** on a version tag: the Windows zip and the signed, notarized Mac zip.
+
 ## 0.5.0 (2026-10-01)
 
 - **A tuning knob** on the right of the faceplate, under the signal meter, mirroring the volume knob like the classic
