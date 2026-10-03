@@ -1,0 +1,110 @@
+# Builds the Windows and macOS downloads when a version tag is pushed (v1.2.3) and attaches them to the GitHub
+# release for that tag (created if it doesn't exist). Run by hand from the Actions tab to try it on a branch.
+#
+# The Mac app is signed and notarized when these repository secrets exist (Settings > Secrets and variables > Actions):
+#   MAC_SIGN_P12        the "Developer ID Application" identity exported from Keychain Access as .p12, base64
+#   MAC_SIGN_PASSWORD   that file's password
+#   MAC_SIGN_IDENTITY   e.g. "Developer ID Application: 808 Heavy Industries LLC (TEAMID)"
+#   NOTARY_KEY_P8       an App Store Connect API key (.p8), base64
+#   NOTARY_KEY_ID       its key id
+#   NOTARY_ISSUER_ID    the issuer id from App Store Connect > Users and Access > Integrations
+# Without them the Mac zip is ad-hoc signed (runs after "Open Anyway" in System Settings).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '9.0.x' }
+      - name: Build (native libraries with MSYS2, then publish)
+        shell: pwsh
+        run: ./build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  mac:
+    name: macOS arm64
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '9.0.x' }
+      - name: Tools for the native build
+        run: brew install cmake autoconf automake libtool pkg-config
+      - name: Cache the native libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            native/bin
+            native/mac/prefix
+            nrsc5/build-mac
+            rtl-sdr/build-mac
+          key: native-mac-${{ runner.arch }}-${{ hashFiles('native/mac/build-native-mac.sh', 'native/mac/r808audio.c', 'native/mac/miniaudio.h', '.gitmodules') }}-${{ hashFiles('.git/modules/nrsc5/HEAD', '.git/modules/rtl-sdr/HEAD') }}
+      - name: Signing identity and notarization credentials
+        if: ${{ env.MAC_SIGN_P12 != '' }}
+        env:
+          MAC_SIGN_P12: ${{ secrets.MAC_SIGN_P12 }}
+          MAC_SIGN_PASSWORD: ${{ secrets.MAC_SIGN_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          # a throwaway keychain holding the identity, unlocked for codesign
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 16)
+          echo "$MAC_SIGN_P12" | base64 --decode > "$RUNNER_TEMP/sign.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/sign.p12" -P "$MAC_SIGN_PASSWORD" -k "$KEYCHAIN" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/sign.p12"
+          # notarization credentials, under the profile name the build script uses
+          echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          xcrun notarytool store-credentials 808Radio --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --keychain "$KEYCHAIN"
+          rm "$RUNNER_TEMP/notary.p8"
+          echo "SIGN_IDENTITY=${{ secrets.MAC_SIGN_IDENTITY }}" >> "$GITHUB_ENV"
+          echo "NOTARY_PROFILE=808Radio" >> "$GITHUB_ENV"
+          echo "NOTARY_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+      - name: Build, sign, notarize
+        run: packaging/mac/build-app.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Attach to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: downloads, merge-multiple: true }
+      - name: Create or update the release
+        env: { GH_TOKEN: ${{ github.token }} }
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "808 Radio ${tag#v}" --notes "See CHANGELOG.md." --draft
+          fi
+          gh release upload "$tag" downloads/*.zip --repo "$GITHUB_REPOSITORY" --clobber

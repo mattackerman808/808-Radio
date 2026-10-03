@@ -64,7 +64,7 @@ codesign --verify --deep --strict "$app" && echo "signature ok"
 if [ -n "${NOTARY_PROFILE:-}" ]; then
     echo "== notarizing"
     ditto -c -k --keepParent "$app" "$dist/notarize.zip"
-    xcrun notarytool submit "$dist/notarize.zip" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun notarytool submit "$dist/notarize.zip" --keychain-profile "$NOTARY_PROFILE" ${NOTARY_KEYCHAIN:+--keychain "$NOTARY_KEYCHAIN"} --wait
     xcrun stapler staple "$app"
     rm -f "$dist/notarize.zip"
     spctl -a -vv "$app" 2>&1 | tail -2
