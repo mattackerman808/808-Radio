@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 808 Radio for macOS (and any Avalonia desktop): the same faceplate, drawn with Avalonia / Skia. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>808Radio</AssemblyName>
+    <RootNamespace>Radio808.Avalonia</RootNamespace>
+    <Product>808 Radio</Product>
+    <Version>0.5.0</Version>
+    <Copyright>GPL-3.0-or-later</Copyright>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Radio808.Shared\Radio808.Shared.csproj" />
+  </ItemGroup>
+
+</Project>
