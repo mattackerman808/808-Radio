@@ -57,6 +57,7 @@ public sealed class RadioController : IDisposable
             engine.ForceAnalog = Settings.ForceAnalog;
             engine.Equalizer = Settings.Equalizer;
             engine.ForceMono = Settings.ForceMono;
+            engine.Program = Settings.Program;   // the HD program you were on (or a preset's, recalled while the radio was down)
             engine.DeviceStopped += msg => _ui.Post(_ => OnDeviceStopped(msg), null);
             try
             {

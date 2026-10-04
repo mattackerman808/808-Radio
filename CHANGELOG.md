@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The HD program you were on is selected again when the radio starts (it was saved but never applied).
 - **Clearing a preset:** hold its key to save, and keep holding (about two seconds more) to clear it: the display says
   P2 CLEARED and the key shows the ghost 88.8 again. Both platforms.
 - **Presets remember the HD program.** Save a preset while on HD2 (or HD3 ...) and recalling it selects that program,
