@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Clearing a preset:** hold its key to save, and keep holding (about two seconds more) to clear it: the display says
+  P2 CLEARED and the key shows the ghost 88.8 again. Both platforms.
+- **Presets remember the HD program.** Save a preset while on HD2 (or HD3 ...) and recalling it selects that program,
+  not just the frequency; the key carries a small HD2 tag under its number, and the lit preset is the one whose
+  frequency *and* program you are on. Old presets stay HD1. Both platforms.
 - **The TUNE knob works with the wheel again.** Since the knobs moved to the right-hand corner (0.7.0), scrolling over
   the TUNE knob changed the volume: the wheel treated the whole right edge as the volume knob. The wheel now changes the
   volume only over the VOL knob; over the TUNE knob (and the display) it tunes. Both platforms.

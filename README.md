@@ -53,7 +53,7 @@ anywhere, though the tuning grid, de-emphasis and program types are US defaults 
 | **Volume** | drag or scroll the knob in the bottom-right corner (its light ring is the level); click it to mute (or ↑/↓, M) |
 | **Tune** | turn the **TUNE** knob (right of the display, above the volume knob; one channel per notch, click it to seek), scroll over the display, or ←/→ |
 | **Seek** | the ⏮ ⏭ keys, Ctrl+←/→, or media keys; with **HD SEEK** lit, seek skips analog-only stations |
-| **Presets 1–6** | click to tune, hold (or right-click, or Ctrl+1–6) to save |
+| **Presets 1–6** | click to tune, hold (or right-click, or Ctrl+1–6) to save, keep holding to clear; a preset saved on HD2, HD3 … recalls that program (its key shows a small HD tag) |
 | **SRC** | HD (automatic blend) or analog FM only (A) |
 | **HD CH** | next HD program: HD1, HD2 … (H); or click a number in the display's `HD 1 2 3` |
 | **DISP** | what the two display lines show: song / station, station / song, station / genre, artist / title, frequency / station (D) |

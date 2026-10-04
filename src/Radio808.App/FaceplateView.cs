@@ -58,14 +58,17 @@ internal sealed class FaceplateView : Control
     private readonly RadioController _c;
     private float _scale = 1, _ox, _oy;
 
-    private sealed record Hit(RectangleF R, string Id, Action? Click, Action? Hold = null);
+    /// <param name="Hold">After the key is held 0.65 s.</param>
+    /// <param name="HoldLong">After it's held 1.8 s longer still (presets: hold to save, keep holding to clear).</param>
+    private sealed record Hit(RectangleF R, string Id, Action? Click, Action? Hold = null, Action? HoldLong = null);
     private readonly List<Hit> _hits = new();
     private string? _hover, _pressed;
     private bool _holdFired, _knobDrag, _knobMoved;
     private PointF _knobStart;
     private float _knobStartVol;
-    private readonly Timer _hold = new() { Interval = 650 };
-    private Action? _holdAction;
+    private const int HoldMs = 650, HoldLongMs = 1800;
+    private readonly Timer _hold = new() { Interval = HoldMs };
+    private Action? _holdAction, _holdLongAction;
 
     // display state
     private string _mainText = "";
@@ -133,6 +136,13 @@ internal sealed class FaceplateView : Control
             _hold.Stop();
             _holdFired = true;
             _holdAction?.Invoke();
+            if (_holdLongAction != null)   // still held: the second stage comes after a longer wait
+            {
+                _holdAction = _holdLongAction;
+                _holdLongAction = null;
+                _hold.Interval = HoldLongMs;
+                _hold.Start();
+            }
             Invalidate();
         };
         _nerd = new NerdPanel(c);
@@ -1066,8 +1076,15 @@ internal sealed class FaceplateView : Control
             {
                 if (_c.Settings.Presets[idx] == null) { Flash($"HOLD {idx + 1} TO SAVE"); return; }
                 _c.RecallPreset(idx);
-            }, lit: current, hold: () => { StorePreset(idx); Flash($"P{idx + 1} SAVED"); });
-            Label(g, (i + 1).ToString(), 15, lit, new RectangleF(r.X + 8, r.Y, 20, h), StringAlignment.Near, bold: true);
+            }, lit: current, hold: () => { StorePreset(idx); Flash($"P{idx + 1} SAVED", 2.5); },
+               holdLong: () => { _c.ClearPreset(idx); Flash($"P{idx + 1} CLEARED", 2.0); });   // keep holding: clear it
+            // the preset number; a preset saved on HD2, HD3 ... carries a small HD tag under it
+            if (p is { Program: > 0 })
+            {
+                Label(g, (i + 1).ToString(), 13, lit, new RectangleF(r.X + 8, r.Y + 1, 20, 16), StringAlignment.Near, bold: true);
+                Label(g, $"HD{p.Program + 1}", 7, current ? lit : Color.FromArgb(170, lit), new RectangleF(r.X + 7, r.Y + 17, 24, 10), StringAlignment.Near, bold: true);
+            }
+            else Label(g, (i + 1).ToString(), 15, lit, new RectangleF(r.X + 8, r.Y, 20, h), StringAlignment.Near, bold: true);
             // the frequency on a little seven-segment window: lit on the preset you're on, dimmer on the others, all
             // ghost 8s on an empty one
             var win = new RectangleF(r.Right - 52, r.Y + 6, 46, h - 12);
@@ -1220,7 +1237,7 @@ internal sealed class FaceplateView : Control
 
     // ------------------------------------------------------------------ widgets
 
-    private void Key(Graphics g, RectangleF r, string id, Action click, bool pattern = false, bool lit = false, Action? hold = null)
+    private void Key(Graphics g, RectangleF r, string id, Action click, bool pattern = false, bool lit = false, Action? hold = null, Action? holdLong = null)
     {
         bool hot = _hover == id, down = _pressed == id;
         using (var p = Rounded(r, 6))
@@ -1239,7 +1256,7 @@ internal sealed class FaceplateView : Control
         }
         if (!down)
             using (var hl = new Pen(Color.FromArgb(30, Color.White), 1)) g.DrawLine(hl, r.X + 6, r.Y + 1.5f, r.Right - 6, r.Y + 1.5f);
-        _hits.Add(new Hit(r, id, click, hold));
+        _hits.Add(new Hit(r, id, click, hold, holdLong));
     }
 
     private static void Label(Graphics g, string s, float px, Color c, RectangleF r, StringAlignment align, bool bold = false)
@@ -1357,7 +1374,7 @@ internal sealed class FaceplateView : Control
         _holdFired = false;
         if (h.Id == "knob") { _knobDrag = true; _knobMoved = false; _knobStart = p; _knobStartVol = _c.Settings.Volume; }
         else if (h.Id == "tuneknob") { _tuneDrag = true; _tuneMoved = false; _tuneStartDeg = AngleDeg(p); _tuneDragDeg = 0; _tuneApplied = 0; }
-        else if (h.Hold != null) { _holdAction = h.Hold; _hold.Start(); }
+        else if (h.Hold != null) { _holdAction = h.Hold; _holdLongAction = h.HoldLong; _hold.Interval = HoldMs; _hold.Start(); }
         Invalidate();
     }
 

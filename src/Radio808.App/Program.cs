@@ -48,7 +48,7 @@ internal static class Program
             settings.Muted = false;
             settings.Volume = 0;   // silent but not muted: the faceplate analyzer goes blank when muted
             // a tidy face for screenshots: demo presets, song / station, cyan, album art on
-            settings.Presets = new() { new() { Mhz = 97.3 }, new() { Mhz = 98.5 }, new() { Mhz = 96.5 }, new() { Mhz = 92.3 }, new() { Mhz = 105.7 }, null };
+            settings.Presets = new() { new() { Mhz = 97.3 }, new() { Mhz = 98.5, Program = 1 }, new() { Mhz = 96.5 }, new() { Mhz = 92.3 }, new() { Mhz = 105.7 }, null };
             settings.DisplayMode = 0;
             settings.Illumination = 0;
             settings.ShowAlbumArt = true;

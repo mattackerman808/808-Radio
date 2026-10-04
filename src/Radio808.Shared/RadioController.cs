@@ -240,35 +240,51 @@ public sealed class RadioController : IDisposable
 
     // ---- presets ----
 
+    /// <summary>Tunes a preset's frequency and selects its HD program (HD1 unless the preset was saved on HD2, HD3 ...).</summary>
     public void RecallPreset(int i)
     {
         var p = Settings.Presets[i];
         if (p == null) return;
         Tune((long)Math.Round(p.Mhz * 1e6));
+        SetProgram(p.Program);
         _lastPreset = i;
     }
 
     private int _lastPreset = -1;
 
+    /// <summary>The HD program selected (0 = HD1), whether or not the station has it yet.</summary>
+    public uint CurrentProgram => Engine?.Program ?? Settings.Program;
+
     /// <summary>
-    /// The preset for the station you're on, or -1: the one last recalled or saved if it's this frequency (several
-    /// presets can hold the same one), else the first that matches.
+    /// The preset for what you're on (frequency and HD program), or -1: the one last recalled or saved if it still
+    /// matches (several presets can hold the same station), else the first that matches.
     /// </summary>
     public int CurrentPreset
     {
         get
         {
-            bool Matches(int i) => Settings.Presets[i] is { } p && Math.Abs(p.Mhz * 1e6 - Frequency) < 50_000;
+            uint program = CurrentProgram;
+            bool Matches(int i) => Settings.Presets[i] is { } p && Math.Abs(p.Mhz * 1e6 - Frequency) < 50_000 && p.Program == program;
             if (_lastPreset >= 0 && _lastPreset < Settings.Presets.Count && Matches(_lastPreset)) return _lastPreset;
             for (int i = 0; i < Settings.Presets.Count; i++) if (Matches(i)) return i;
             return -1;
         }
     }
 
+    /// <summary>Saves the station you're on, with its HD program, to preset <paramref name="i"/>.</summary>
     public void StorePreset(int i, string? name)
     {
         _lastPreset = i;
-        Settings.Presets[i] = new Preset { Mhz = Math.Round(Frequency / 1e5) / 10, Name = name };
+        Settings.Presets[i] = new Preset { Mhz = Math.Round(Frequency / 1e5) / 10, Name = name, Program = CurrentProgram };
+        Settings.Save();
+        Changed?.Invoke();
+    }
+
+    /// <summary>Empties preset <paramref name="i"/> (the key shows a ghost 88.8 again).</summary>
+    public void ClearPreset(int i)
+    {
+        if (_lastPreset == i) _lastPreset = -1;
+        Settings.Presets[i] = null;
         Settings.Save();
         Changed?.Invoke();
     }
@@ -277,9 +293,8 @@ public sealed class RadioController : IDisposable
 
     public void SetProgram(uint p)
     {
-        if (Engine == null) return;
-        Engine.Program = p;
-        Settings.Program = p;
+        Settings.Program = p;   // kept even without a radio, so a preset recalled before the dongle is up still takes effect
+        if (Engine != null) Engine.Program = p;
         Changed?.Invoke();
     }
 

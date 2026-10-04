@@ -69,16 +69,19 @@ internal sealed class FaceplateControl : Control
     private readonly RadioController _c;
     private double _scale = 1, _ox, _oy;
 
-    private sealed record Hit(Rect R, string Id, Action? Click, Action? Hold = null);
+    /// <param name="Hold">After the key is held 0.65 s.</param>
+    /// <param name="HoldLong">After it's held 1.8 s longer still (presets: hold to save, keep holding to clear).</param>
+    private sealed record Hit(Rect R, string Id, Action? Click, Action? Hold = null, Action? HoldLong = null);
     private readonly List<Hit> _hits = new();
     private string? _hover, _pressed;
     private bool _holdFired, _knobDrag, _knobMoved, _edgeDrag;
     private Point _knobStart;
     private float _knobStartVol;
-    private readonly DispatcherTimer _hold = new() { Interval = TimeSpan.FromMilliseconds(650) };
+    private static readonly TimeSpan HoldTime = TimeSpan.FromMilliseconds(650), HoldLongTime = TimeSpan.FromMilliseconds(1800);
+    private readonly DispatcherTimer _hold = new() { Interval = HoldTime };
     private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromMilliseconds(100) };
     private readonly DispatcherTimer _frames = new() { Interval = TimeSpan.FromMilliseconds(16) };
-    private Action? _holdAction;
+    private Action? _holdAction, _holdLongAction;
 
     // display state
     private string _mainText = "";
@@ -122,6 +125,13 @@ internal sealed class FaceplateControl : Control
             _hold.Stop();
             _holdFired = true;
             _holdAction?.Invoke();
+            if (_holdLongAction != null)   // still held: the second stage comes after a longer wait
+            {
+                _holdAction = _holdLongAction;
+                _holdLongAction = null;
+                _hold.Interval = HoldLongTime;
+                _hold.Start();
+            }
             InvalidateVisual();
         };
         _tick.Tick += (_, _) => Tick();
@@ -874,8 +884,15 @@ internal sealed class FaceplateControl : Control
             {
                 if (_c.Settings.Presets[idx] == null) { Flash($"HOLD {idx + 1} TO SAVE"); return; }
                 _c.RecallPreset(idx);
-            }, lit: current, hold: () => { StorePreset(idx); Flash($"P{idx + 1} SAVED"); });
-            g.Label((i + 1).ToString(), 15, lit, R(r.X + 8, r.Y, 20, h), Align.Near, bold: true);
+            }, lit: current, hold: () => { StorePreset(idx); Flash($"P{idx + 1} SAVED", 2.5); },
+               holdLong: () => { _c.ClearPreset(idx); Flash($"P{idx + 1} CLEARED", 2.0); });   // keep holding: clear it
+            // the preset number; a preset saved on HD2, HD3 ... carries a small HD tag under it
+            if (p is { Program: > 0 })
+            {
+                g.Label((i + 1).ToString(), 13, lit, R(r.X + 8, r.Y + 1, 20, 16), Align.Near, bold: true);
+                g.Label($"HD{p.Program + 1}", 7, current ? lit : lit.With(170), R(r.X + 7, r.Y + 17, 24, 10), Align.Near, bold: true);
+            }
+            else g.Label((i + 1).ToString(), 15, lit, R(r.X + 8, r.Y, 20, h), Align.Near, bold: true);
             var win = R(r.Right - 52, r.Y + 6, 46, h - 12);
             g.FillRounded(Brush(Rgb(0x04, 0x06, 0x08)), win, 3);
             const double segH = 12;
@@ -1014,14 +1031,14 @@ internal sealed class FaceplateControl : Control
 
     // ------------------------------------------------------------------ widgets
 
-    private void Key(DrawingContext g, Rect r, string id, Action click, bool pattern = false, bool lit = false, Action? hold = null)
+    private void Key(DrawingContext g, Rect r, string id, Action click, bool pattern = false, bool lit = false, Action? hold = null, Action? holdLong = null)
     {
         bool hot = _hover == id, down = _pressed == id;
         g.FillRounded(Gradient(r, down ? Key2 : hot ? Rgb(0x36, 0x3B, 0x43) : Key1, down ? Key1 : Key2, 90), r, 6);
         if (pattern) g.FillRounded(Hatch(Lit.With(60)), r, 6);   // a diagonal hatch, like an illuminated phone key
         g.DrawRounded(Pen(lit ? Lit : Rgb(0x05, 0x05, 0x06), lit ? 1.5 : 1.2), r, 6);
         if (!down) g.DrawLine(Pen(White.With(30), 1), r.X + 6, r.Y + 1.5, r.Right - 6, r.Y + 1.5);
-        _hits.Add(new Hit(r, id, click, hold));
+        _hits.Add(new Hit(r, id, click, hold, holdLong));
     }
 
     /// <summary>A rounded rectangle as a geometry (for combining; drawing one uses RoundedRect directly).</summary>
@@ -1200,7 +1217,7 @@ internal sealed class FaceplateControl : Control
         _holdFired = false;
         if (h.Id == "knob") { _knobDrag = true; _knobMoved = false; _knobStart = p; _knobStartVol = _c.Settings.Volume; }
         else if (h.Id == "tuneknob") { _tuneDrag = true; _tuneMoved = false; _tuneStartDeg = AngleDeg(p); _tuneDragDeg = 0; }
-        else if (h.Hold != null) { _holdAction = h.Hold; _hold.Start(); }
+        else if (h.Hold != null) { _holdAction = h.Hold; _holdLongAction = h.HoldLong; _hold.Interval = HoldTime; _hold.Start(); }
         InvalidateVisual();
     }
 

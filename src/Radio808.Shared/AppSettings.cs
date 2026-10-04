@@ -9,6 +9,8 @@ public sealed class Preset
 {
     public double Mhz { get; set; }
     public string? Name { get; set; }
+    /// <summary>The HD program (0 = HD1, the main program, which is also what an analog-only station plays).</summary>
+    public uint Program { get; set; }
 }
 
 /// <summary>User settings, saved as JSON in <see cref="Dir"/>/settings.json.</summary>

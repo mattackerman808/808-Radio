@@ -20,7 +20,8 @@ USING IT
 - Drag the faceplate to move it; drag its edges to resize.
 - Volume: drag or scroll the knob (click it to mute). Tune: turn the TUNE knob on the right (click it to seek),
   scroll over the display, or the arrow keys.
-- Seek: the |<< >>| keys (or Ctrl+arrows). Presets 1-6: click to tune, hold to save.
+- Seek: the |<< >>| keys (or Ctrl+arrows). Presets 1-6: click to tune, hold to save, keep holding to clear
+  (a preset saved on HD2, HD3 ... recalls that program; its key shows a small HD tag).
 - SRC switches HD / analog FM. HD CH cycles HD programs (HD1, HD2 ...). DISP steps through what the
   display lines show (song, station, genre, artist, title, frequency).
 - The small key above the left end of the display flips the faceplate down to a panel with a spectrum and
