@@ -886,20 +886,25 @@ internal sealed class FaceplateControl : Control
                 _c.RecallPreset(idx);
             }, lit: current, hold: () => { StorePreset(idx); Flash($"P{idx + 1} SAVED", 2.5); },
                holdLong: () => { _c.ClearPreset(idx); Flash($"P{idx + 1} CLEARED", 2.0); });   // keep holding: clear it
-            // the preset number; a preset saved on HD2, HD3 ... carries a small HD tag under it
-            if (p is { Program: > 0 })
-            {
-                g.Label((i + 1).ToString(), 13, lit, R(r.X + 8, r.Y + 1, 20, 16), Align.Near, bold: true);
-                g.Label($"HD{p.Program + 1}", 7, current ? lit : lit.With(170), R(r.X + 7, r.Y + 17, 24, 10), Align.Near, bold: true);
-            }
-            else g.Label((i + 1).ToString(), 15, lit, R(r.X + 8, r.Y, 20, h), Align.Near, bold: true);
-            var win = R(r.Right - 52, r.Y + 6, 46, h - 12);
+            g.Label((i + 1).ToString(), 15, lit, R(r.X + 8, r.Y, 20, h), Align.Near, bold: true);
+            // a little LCD window: the frequency in seven-segment digits, then a fixed HD legend with its own small
+            // digit, every element always there: lit on the preset you're on, dimmer on the others, ghost 8s on an
+            // empty one; the HD legend and digit are ghosts unless the preset was saved on HD2, HD3 ...
+            var win = R(r.X + 22, r.Y + 6, r.Width - 27, h - 12);
             g.FillRounded(Brush(Rgb(0x04, 0x06, 0x08)), win, 3);
-            const double segH = 12;
+            const double segH = 10.5, progH = 7, hdPx = 6.5;
+            var on = current ? lit : lit.With(150);
+            var ghost = lit.With(22);
+            double bottom = win.Y + (win.Height + segH) / 2;
+            double progX = win.Right - 4 - SevenSegment.DigitWidth(progH);
+            bool hasProg = p is { Program: > 0 };
+            SevenSegment.Draw(g, hasProg ? (p!.Program + 1).ToString() : " ", progX, bottom - progH, progH, on, ghost);
+            double hdW = G.TextWidth("HD", hdPx, bold: true);
+            double hdX = progX - 1 - hdW;
+            g.Label("HD", hdPx, hasProg ? on : ghost, R(hdX, bottom - progH - 1.5, hdW + 1, 9), Align.Near, bold: true);
             string digits = p == null ? "    " : p.Mhz.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture).PadLeft(5);
             double digitsW = 4 * SevenSegment.DigitWidth(segH) + 3 * segH * 0.16;
-            SevenSegment.Draw(g, digits, win.Right - 5 - digitsW, win.Y + (win.Height - segH) / 2, segH,
-                current ? lit : lit.With(150), lit.With(22));
+            SevenSegment.Draw(g, digits, hdX - 3 - digitsW, bottom - segH, segH, on, ghost);
         }
     }
 

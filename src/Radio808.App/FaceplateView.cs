@@ -1065,6 +1065,9 @@ internal sealed class FaceplateView : Control
         SeekIcon(g, up, 1, lit);
         float x0 = 408, gap = 4, w = (912 - x0 - gap * 5) / 6;
         int currentPreset = _c.CurrentPreset;   // one key lit, even if several presets hold this station
+        float hdW;
+        using (var hf = new Font("Segoe UI Semibold", 6.5f, FontStyle.Regular, GraphicsUnit.Pixel))
+            hdW = g.MeasureString("HD", hf, PointF.Empty, StringFormat.GenericTypographic).Width;
         for (int i = 0; i < AppSettings.PresetCount; i++)
         {
             var r = new RectangleF(x0 + i * (w + gap), y, w, h);
@@ -1078,23 +1081,25 @@ internal sealed class FaceplateView : Control
                 _c.RecallPreset(idx);
             }, lit: current, hold: () => { StorePreset(idx); Flash($"P{idx + 1} SAVED", 2.5); },
                holdLong: () => { _c.ClearPreset(idx); Flash($"P{idx + 1} CLEARED", 2.0); });   // keep holding: clear it
-            // the preset number; a preset saved on HD2, HD3 ... carries a small HD tag under it
-            if (p is { Program: > 0 })
-            {
-                Label(g, (i + 1).ToString(), 13, lit, new RectangleF(r.X + 8, r.Y + 1, 20, 16), StringAlignment.Near, bold: true);
-                Label(g, $"HD{p.Program + 1}", 7, current ? lit : Color.FromArgb(170, lit), new RectangleF(r.X + 7, r.Y + 17, 24, 10), StringAlignment.Near, bold: true);
-            }
-            else Label(g, (i + 1).ToString(), 15, lit, new RectangleF(r.X + 8, r.Y, 20, h), StringAlignment.Near, bold: true);
-            // the frequency on a little seven-segment window: lit on the preset you're on, dimmer on the others, all
-            // ghost 8s on an empty one
-            var win = new RectangleF(r.Right - 52, r.Y + 6, 46, h - 12);
+            Label(g, (i + 1).ToString(), 15, lit, new RectangleF(r.X + 8, r.Y, 20, h), StringAlignment.Near, bold: true);
+            // a little LCD window: the frequency in seven-segment digits, then a fixed HD legend with its own small
+            // digit, every element always there: lit on the preset you're on, dimmer on the others, ghost 8s on an
+            // empty one; the HD legend and digit are ghosts unless the preset was saved on HD2, HD3 ...
+            var win = new RectangleF(r.X + 22, r.Y + 6, r.Width - 27, h - 12);
             using (var wp = Rounded(win, 3))
             using (var wb = new SolidBrush(Color.FromArgb(0x04, 0x06, 0x08))) g.FillPath(wb, wp);
-            const float segH = 12;
+            const float segH = 10.5f, progH = 7, hdPx = 6.5f;
+            var on = current ? lit : Color.FromArgb(150, lit);
+            var ghost = Color.FromArgb(22, lit);
+            float bottom = win.Y + (win.Height + segH) / 2;
+            float progX = win.Right - 4 - SevenSegment.DigitWidth(progH);
+            bool hasProg = p is { Program: > 0 };
+            SevenSegment.Draw(g, hasProg ? (p!.Program + 1).ToString() : " ", progX, bottom - progH, progH, on, ghost);
+            float hdX = progX - 1 - hdW;
+            Label(g, "HD", hdPx, hasProg ? on : ghost, new RectangleF(hdX, bottom - progH - 1.5f, hdW + 1, 9), StringAlignment.Near, bold: true);
             string digits = p == null ? "    " : p.Mhz.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture).PadLeft(5);
             float digitsW = 4 * SevenSegment.DigitWidth(segH) + 3 * segH * 0.16f;
-            SevenSegment.Draw(g, digits, win.Right - 5 - digitsW, win.Y + (win.Height - segH) / 2, segH,
-                current ? lit : Color.FromArgb(150, lit), Color.FromArgb(22, lit));
+            SevenSegment.Draw(g, digits, hdX - 3 - digitsW, bottom - segH, segH, on, ghost);
         }
     }
 
