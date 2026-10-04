@@ -1,25 +1,27 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 (2026-10-04)
 
-- **Switching HD programs is a short silence, not a spell of the analog.** The HD timeline is the station's, so it keeps
-  running across a program switch: the old program fades out, the analog stays muted (it isn't the new program), and the
-  new one comes on as soon as it's buffered, about half a second. HD1's alignment carries over, so going back to HD1 no
-  longer waits six to eight seconds for a new measurement (the next measurement checks it). Nothing is re-peaked: the
-  gain only starts over on a new frequency.
-- **A preset for the station you're on no longer retunes** (HD stays locked), and a preset's HD2 is no longer undone
-  by the retune: the decoder reset the program to HD1 when its session restarted, a moment after the preset set it, so
-  a 97.7 HD2 preset landed on HD1. A new station still starts on HD1.
-- The HD program you were on is selected again when the radio starts (it was saved but never applied).
-- **Clearing a preset:** hold its key to save, and keep holding (about two seconds more) to clear it: the display says
-  P2 CLEARED and the key shows the ghost 88.8 again. Both platforms.
 - **Presets remember the HD program.** Save a preset while on HD2 (or HD3 ...) and recalling it selects that program,
-  not just the frequency; the key's little window reads `98.5 HD2` (an HD legend and digit that are ghosts on an HD1
-  preset, like the unlit segments), and the lit preset is the one whose
-  frequency *and* program you are on. Old presets stay HD1. Both platforms.
+  not just the frequency. The key's little window reads like an LCD: the frequency, then a fixed HD legend with its
+  own small digit, both ghosts on an HD1 preset like the unlit segments and lit on one saved on HD2 (`98.5 HD2`). The
+  lit preset is the one whose frequency *and* program you're on. Old presets stay HD1. Both platforms.
+- **Clearing a preset:** hold its key to save, and keep holding (about two seconds more) to clear it: the display says
+  P2 CLEARED and the window shows the ghost 88.8 again.
+- **Switching HD programs is a short silence, not a spell of the analog.** The HD timeline is the station's, so it
+  keeps running across a program switch: the old program fades out, the analog stays muted (it isn't the new program)
+  and the new one comes on as soon as it's buffered, about half a second. HD1's alignment carries over, so going back
+  to HD1 no longer waits six to eight seconds for a new measurement (the next measurement checks it). Nothing is
+  re-peaked: the gain only starts over on a new frequency.
+- **A preset for the station you're on no longer retunes** (HD stays locked), and a preset's HD2 is no longer undone by
+  the retune: the decoder reset the program to HD1 when its session restarted, a moment after the preset set it, so a
+  97.7 HD2 preset landed on HD1. A new station still starts on HD1.
+- The HD program you were on is selected again when the radio starts (it was saved but never applied).
 - **The TUNE knob works with the wheel again.** Since the knobs moved to the right-hand corner (0.7.0), scrolling over
-  the TUNE knob changed the volume: the wheel treated the whole right edge as the volume knob. The wheel now changes the
-  volume only over the VOL knob; over the TUNE knob (and the display) it tunes. Both platforms.
+  the TUNE knob changed the volume: the wheel treated the whole right edge as the volume knob. The wheel now changes
+  the volume only over the VOL knob; over the TUNE knob (and the display) it tunes. Both platforms.
+- Tools: `hd` takes `R808_HD_SWITCH=30:1,45:0` to switch programs at those seconds; `capture` records through
+  rtl_tcp when `R808_RTLTCP` is set.
 
 ## 0.7.0 (2026-10-03)
 
