@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using NAudio.Wave;
 using Radio808.Core.Dsp;
@@ -66,6 +68,9 @@ internal static class HdTools
         var sw = Stopwatch.StartNew();
         double nextReport = 1;
         bool conj = Environment.GetEnvironmentVariable("R808_CONJ") == "1";   // mirror the spectrum (negate Q)
+        // R808_HD_SWITCH="20:1,40:0": switch to program 1 at 20 s, back to HD1 at 40 s (tests the program switch)
+        var switches = (Environment.GetEnvironmentVariable("R808_HD_SWITCH") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Split(':')).Select(p => (At: double.Parse(p[0], CultureInfo.InvariantCulture), Program: uint.Parse(p[1]))).ToList();
         for (int off = 0; off + block <= data.Length; off += block)
         {
             for (int i = 0; i < block; i++) iq[i] = (data[off + i] - 127.4f) / 128f;
@@ -73,6 +78,12 @@ internal static class HdTools
             rx.Process(iq);
             hd.WaitIdle();   // as if live: HD is decoded as soon as its samples arrive
             double t = (off + block) / 2.0 / FmReceiver.DeviceRate;
+            while (switches.Count > 0 && t >= switches[0].At)
+            {
+                Console.WriteLine($"{t,6:F1} s  switch to HD{switches[0].Program + 1}");
+                hd.Program = switches[0].Program;
+                switches.RemoveAt(0);
+            }
             if (t >= nextReport)
             {
                 var s = hd.Status;

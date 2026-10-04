@@ -162,9 +162,9 @@ settings untouched, beside a normal copy) and writes paint timings per section.
 | Command | |
 |---|---|
 | `devices`, `probe <MHz>` | list dongles; stream and report rate and level |
-| `capture <MHz> <s> <out.cu8> [gain]` | record I/Q (nrsc5's cu8 format) |
+| `capture <MHz> <s> <out.cu8> [gain]` | record I/Q (nrsc5's cu8 format; through rtl_tcp when `R808_RTLTCP=host` is set) |
 | `spectrum <file>`, `scan [gain]`, `ripplescan [gain]` | spectrum of a recording; band scans |
-| `fm <in.cu8> <out.wav>`, `hd <in.cu8> <out.wav>` | offline decoding with stats (HD: alignment, blend, L/R check) |
+| `fm <in.cu8> <out.wav>`, `hd <in.cu8> <out.wav>` | offline decoding with stats (HD: alignment, blend, L/R check; `R808_HD_SWITCH=30:1,45:0` switches programs at those seconds) |
 | `play <MHz> [gain\|auto]` | the radio in a console, with live stats |
 | `selftest [CNR] [echo dB] [echo µs]` | synthetic stereo broadcast through the receiver |
 | `gainsweep`, `gaintest`, `ppmtest`, `ctlstress` | gain, frequency-correction and control-path tests |

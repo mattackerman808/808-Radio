@@ -31,6 +31,7 @@ public sealed unsafe class HdBlender
     private const double EnvRate = 200;                           // envelope buckets per second
     private const int EnvRing = 200 * 40;                         // 40 s of envelopes
     private const double AlignWaitSeconds = 15;                   // then give up and play unaligned
+    private const double SwitchMuteSeconds = 2.5;                 // after a program switch: silence, not analog, while the new program buffers
 
     private readonly double _outRate;
     private readonly object _lock = new();
@@ -63,6 +64,10 @@ public sealed unsafe class HdBlender
     private bool _correlating;
     private double _nextCorrelate;
     private int _session;
+    private bool _alignCarried;   // the alignment came over a program switch: the next measurement checks it
+
+    // A program switch: the analog is muted (it isn't the new program) until the new program plays, or this passes.
+    private double _analogMuteUntil = double.NegativeInfinity;
 
     // Loudness envelopes (mean |mono| per 5 ms bucket).
     private readonly float[] _aEnv = new float[EnvRing];   // indexed by output-clock bucket
@@ -154,7 +159,7 @@ public sealed unsafe class HdBlender
         }
     }
 
-    /// <summary>New station or program: forget the HD timeline and alignment, back to analog.</summary>
+    /// <summary>New station: forget the HD timeline and alignment, back to analog.</summary>
     public void Clear()
     {
         lock (_lock)
@@ -165,6 +170,39 @@ public sealed unsafe class HdBlender
             _requiredGood = 0.5;
             _dropouts = 0;
             _lastDropout = double.NegativeInfinity;
+            _analogMuteUntil = double.NegativeInfinity;
+            _alignCarried = false;
+        }
+    }
+
+    /// <summary>
+    /// Another program of the same station. The HD timeline is the station's, shared by its programs (each delivers
+    /// the same number of samples per frame), so it keeps running: what's buffered is the old program, so it becomes
+    /// a gap, and the new program plays as soon as it's buffered; HD1's alignment carries over, so going back to
+    /// HD1 doesn't wait for a new measurement (the next one checks it). Like a head unit, the switch is a short
+    /// silence, not a spell of the analog, which isn't the new program: while the old audio fades out and the new
+    /// program buffers (about half a second), the analog is muted (unless the new program is HD1, which the analog
+    /// simulcasts). If HD was playing, the signal is fine: no clean-run wait before the new program comes on.
+    /// </summary>
+    public void SwitchProgram(int program)
+    {
+        lock (_lock)
+        {
+            if (program == Program) return;
+            bool playing = _mix > 0;
+            Program = program;
+            if (_written > 0)
+            {
+                _gaps.Clear();   // everything so far is the old program (older gaps are inside this one)
+                _gaps.Add((Math.Max(0, _written - Capacity), _written - 1));
+            }
+            Array.Fill(_hEnv, float.NaN);   // the old program's loudness means nothing for the new one's alignment
+            _hAcc = 0; _hCnt = 0; _hBad = false;
+            _hdOn = false;   // fades out over the old audio, still buffered
+            if (playing) _requiredGood = 0;
+            _alignCarried = Aligned;
+            _nextCorrelate = 0;
+            _analogMuteUntil = playing && program != 0 ? _now + SwitchMuteSeconds : double.NegativeInfinity;
         }
     }
 
@@ -257,11 +295,13 @@ public sealed unsafe class HdBlender
                 _hdOn = true;
             }
 
+            bool muteAnalog = _now < _analogMuteUntil;   // between programs: silence rather than the analog
             if (!_hdOn && _mix == 0)
             {
                 _readPos += span;   // keep tracking the timeline
                 _outSamples += frames;
                 _now = _outSamples / outRate;
+                if (muteAnalog) buffer.Clear();
                 return;             // pure analog
             }
 
@@ -281,7 +321,7 @@ public sealed unsafe class HdBlender
                 _readPos += step;
 
                 _mix = _hdOn ? Math.Min(1, _mix + fadeStep) : Math.Max(0, _mix - fadeStep);
-                float g = _gain * _mix, a = 1 - _mix;
+                float g = _gain * _mix, a = muteAnalog ? 0 : 1 - _mix;
                 buffer[2 * i] = aL * a + hL * g;
                 buffer[2 * i + 1] = aR * a + hR * g;
             }
@@ -324,7 +364,7 @@ public sealed unsafe class HdBlender
     {
         if (_correlating || Program != 0 || double.IsNaN(_t0) || _now < _nextCorrelate) return;
         if (_goodFramesTotal < InRate * 6) return;   // need some clean HD first
-        _nextCorrelate = _now + (Aligned ? 20 : 2);
+        _nextCorrelate = _now + (Aligned && !_alignCarried ? 20 : 2);
         _correlating = true;
 
         var a = (float[])_aEnv.Clone();
@@ -346,6 +386,15 @@ public sealed unsafe class HdBlender
                     bool confirmed = !double.IsNaN(_candidate) && Math.Abs(align - _candidate) < 0.03;
                     _candidate = align;
                     if (!confirmed) return;
+                }
+                else if (_alignCarried)
+                {
+                    // the alignment came over a program switch: the first fresh measurement checks it. If it
+                    // disagrees, take the measurement and re-seat (fade out, jump, fade in) rather than slew.
+                    _alignCarried = false;
+                    _alignScore = score;
+                    if (Math.Abs(align - _align) >= 0.03) { _align = align; _hdOn = false; }
+                    return;
                 }
                 // accept a new estimate; while HD is audible the servo slews to it
                 if (!Aligned || Math.Abs(align - _align) < 0.03 || score > _alignScore + 0.05 || score > 0.7)

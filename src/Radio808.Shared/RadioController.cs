@@ -193,10 +193,13 @@ public sealed class RadioController : IDisposable
     {
         CancelSeek();
         hz = Math.Clamp(hz, RadioEngine.MinFrequency, RadioEngine.MaxFrequency);
+        bool same = hz == Frequency;
         Settings.FrequencyMhz = hz / 1e6;
+        if (!same) Settings.Program = 0;   // a new station starts on HD1 (the engine does the same)
         try
         {
-            if (Engine != null) Engine.Frequency = hz;
+            // the station you're already on (a preset for it): no retune, so HD stays locked and the gain stays put
+            if (Engine != null && !same) Engine.Frequency = hz;
         }
         catch (Exception ex)
         {
@@ -229,6 +232,7 @@ public sealed class RadioController : IDisposable
         {
             if (_seekCts == cts) _seekCts = null;
             Settings.FrequencyMhz = Frequency / 1e6;
+            Settings.Program = Engine?.Program ?? Settings.Program;   // a seek lands on HD1
             Changed?.Invoke();
         }
     }

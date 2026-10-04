@@ -229,7 +229,9 @@ internal static class Program
 
     private static int Capture(double mhz, double seconds, string path, double? gainDb)
     {
-        using var dev = Open(mhz);
+        var net = Environment.GetEnvironmentVariable("R808_RTLTCP");   // a network dongle, as for play
+        using IIqSource dev = net is { Length: > 0 } ? new RtlTcpSource(net) : Open(mhz);
+        if (net is { Length: > 0 }) { dev.SampleRate = SampleRate; dev.Frequency = (long)Math.Round(mhz * 1e6); }
         dev.Gain = gainDb;
         Console.WriteLine($"gain: {(gainDb is null ? "auto" : gainDb + " dB")} -> tuner reports {dev.Gain} dB");
         long want = (long)(seconds * SampleRate) * 2;

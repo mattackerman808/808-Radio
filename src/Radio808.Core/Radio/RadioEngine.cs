@@ -134,6 +134,7 @@ public sealed class RadioEngine : IDisposable
         set
         {
             value = Math.Clamp(value, MinFrequency, MaxFrequency);
+            if (value != Interlocked.Read(ref _frequency)) _hd.Program = 0;   // a new station starts on HD1 (set here, synchronously, so a program chosen right after sticks)
             Interlocked.Exchange(ref _frequency, value);
             _dev.Frequency = value;
             Interlocked.Increment(ref _retuneGeneration);   // the device thread resets the DSP on its next block

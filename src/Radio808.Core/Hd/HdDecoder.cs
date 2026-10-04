@@ -104,8 +104,7 @@ public sealed unsafe class HdDecoder : IDisposable
         {
             if (_program == value) return;
             _program = value;
-            _blender.Program = (int)value;
-            _blender.Clear();
+            _blender.SwitchProgram((int)value);
             _pendingArtLot = -1;
             _programArt.TryGetValue(value, out var art);
             _programLogo.TryGetValue(value, out var logo);
@@ -229,8 +228,9 @@ public sealed unsafe class HdDecoder : IDisposable
         _programArt.Clear();
         _programLogo.Clear();
         _pendingArtLot = -1;
-        _program = 0;
-        _blender.Program = 0;
+        // the program is not reset here: a retune sets HD1 on the UI thread (RadioEngine.Frequency), before the
+        // session restarts on this thread, so a program chosen right after a tune (a preset's HD2) isn't undone
+        _blender.Program = (int)_program;
         lock (_lock) _status = new HdStatus();
     }
 
