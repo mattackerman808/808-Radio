@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **The TUNE knob works with the wheel again.** Since the knobs moved to the right-hand corner (0.7.0), scrolling over
+  the TUNE knob changed the volume: the wheel treated the whole right edge as the volume knob. The wheel now changes the
+  volume only over the VOL knob; over the TUNE knob (and the display) it tunes. Both platforms.
+
 ## 0.7.0 (2026-10-03)
 
 - **The weather map on Windows.** The HD weather radar is drawn over a street map of the same box on both

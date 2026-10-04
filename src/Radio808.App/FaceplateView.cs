@@ -1402,8 +1402,8 @@ internal sealed class FaceplateView : Control
     {
         var p = ToDesign(e.Location);
         if (_open) { _c.Step(Math.Sign(e.Delta)); Invalidate(); return; }   // panel open: the wheel tunes
-        if (p.X > 915) SetVolume(_c.Settings.Volume + Math.Sign(e.Delta) * 0.025f);   // over the knobs on the right: volume
-        else _c.Step(Math.Sign(e.Delta));                                              // over the display: tune
+        if (HitAt(p)?.Id == "knob") SetVolume(_c.Settings.Volume + Math.Sign(e.Delta) * 0.025f);   // over the volume knob: volume
+        else _c.Step(Math.Sign(e.Delta));                                                           // anywhere else (the display, the TUNE knob): tune
         Invalidate();
     }
 

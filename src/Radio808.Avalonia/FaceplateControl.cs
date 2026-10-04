@@ -1251,7 +1251,7 @@ internal sealed class FaceplateControl : Control
         if (d == 0) return;
         e.Handled = true;
         var now = DateTime.UtcNow;
-        if (p.X > 915 && !_open)   // over the knobs on the right: volume (panel open: the wheel tunes everywhere)
+        if (!_open && HitAt(p)?.Id == "knob")   // over the volume knob: volume (the TUNE knob and the display tune; panel open: the wheel tunes everywhere)
         {
             SetVolume(_c.Settings.Volume + (float)(d * 0.025));
             InvalidateVisual();
