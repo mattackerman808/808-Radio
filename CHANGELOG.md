@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.1 (2026-10-07)
 
 - **Automatic gain peaks HD stations next to a strong neighbour.** It climbed until the ADC clipped, but beside a
   strong station the tuner overloads well before that: the noise floor rises faster than the gain while nothing clips.
