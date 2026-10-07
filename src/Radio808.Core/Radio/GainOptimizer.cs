@@ -11,13 +11,16 @@ namespace Radio808.Core.Radio;
 /// Two failure modes bound the right gain. Too much and the RTL's 8-bit ADC clips: the "front end falls off", and
 /// on a strong station HD MER collapses within one 3 dB step (measured on 98.5: 0.08% clipping / MER 12 dB at
 /// 16.6 dB gain, 7.6% / 10.5 dB at 19.7, 32% / 6.3 at 22.9). Too little and the tuner's noise dominates on weak
-/// stations. So:
+/// stations. And next to a strong station the tuner itself overloads well before the ADC clips: the noise floor
+/// rises faster than the gain, which only the spectrum shows (<see cref="SignalQuality"/>). So:
 /// <list type="bullet">
 /// <item>An overload guard (every 100 ms) drops a step as soon as clipping exceeds <see cref="ClipHigh"/>.</item>
-/// <item>After each tune, acquisition backs off any overload, then climbs/descends on a fast quality metric (pilot SNR
-///   for stereo, envelope ripple otherwise), preferring the lowest gain that's as good as the best.</item>
-/// <item>Then tracking: every ~15 s it tries one step up or down against a fresh baseline and keeps it only if the
-///   quality clearly improves. With HD synced the metric is nrsc5's MER, which is what matters for HD.</item>
+/// <item>After each tune, acquisition backs off any overload, then walks the gain on the spectral score (the HD
+///   sidebands over the floor once the station has shown them, else the carrier), with clipping as a ceiling,
+///   preferring the lowest gain that's as good as the best.</item>
+/// <item>Then tracking: every ~15 s (~7 s while HD is on the air but not yet decoding) it tries one step up or down
+///   against a fresh baseline and keeps it only if the score clearly improves. With HD synced the metric is nrsc5's
+///   MER, which is what matters for HD.</item>
 /// </list>
 /// The best gain per station is remembered, so returning to a station starts at its peak.
 /// </summary>
@@ -86,6 +89,7 @@ public sealed class GainOptimizer : IDisposable
         _idx = Math.Clamp(idx, 0, _gains.Count - 1);
         _e.ApplyGain(_gains[_idx]);
         _e.TakeClipFraction();   // measurements start fresh at the new gain
+        _e.TakeQuality();
         // a network dongle's samples from before the change are still arriving for a while: don't judge by them
         _settleUntil = DateTime.UtcNow + _e.Device.ControlLatency;
     }
@@ -109,7 +113,8 @@ public sealed class GainOptimizer : IDisposable
                     continue;
                 }
                 if (_e.IsSeeking) { State = Phase.Paused; _gen = -1; await Task.Delay(200, ct); continue; }
-                if (_e.RetuneGeneration != _gen)
+                // a new station, or an acquisition the overload guard cut short (a hot station tuned at a high gain)
+                if (_e.RetuneGeneration != _gen || !_acquired)
                 {
                     _gen = _e.RetuneGeneration;
                     await Acquire(ct);
@@ -169,98 +174,165 @@ public sealed class GainOptimizer : IDisposable
         !_ceiling.TryGetValue(Channel(_e.Frequency), out var c) || DateTime.UtcNow > c.until || idx < c.idx;
     private static long Channel(long hz) => (hz + 50_000) / 100_000;
 
-    /// <summary>Fast quality metric (higher is better): pilot SNR for stereo stations, else -20 log10(ripple).</summary>
-    private (double score, string metric) FastScore()
+    // ------------------------------------------------------------------ the spectral score
+
+    /// <summary>The station being played has shown HD sidebands (or synced): steer by them rather than the carrier.</summary>
+    private bool _hdSeen;
+    /// <summary>Channels that have shown HD sidebands, so a return visit steers by them from the first step.</summary>
+    private readonly HashSet<long> _hdChannels = new();
+    private DateTime _acquiredAt;
+    private bool _acquired;
+
+    private const int Stride = 2;            // gain steps per move while walking (the R820T's are 0.9-5 dB)
+    private const double Better = 0.5;       // dB: a clear improvement (tracking)
+    /// <summary>
+    /// dB: as good as the best, so the lower gain wins. Small: on a weak station the peak is broad (107.7: sidebands
+    /// 8.5 dB over the floor at 2.7 dB gain, 9.6 at 16.6-22.9, MER 6.5 -> 7.3), and every half dB of MER counts there.
+    /// </summary>
+    private const double AsGood = 0.25;
+
+    /// <summary>
+    /// dB, higher is better: the HD sidebands over the noise floor once the station has shown them, else the analog
+    /// carrier. The sidebands are ~17 dB below the carrier and closer to the neighbours, so on an HD station they're
+    /// what has to be peaked.
+    /// </summary>
+    private double Score(SignalQuality.Reading r) => _hdSeen ? r.SidebandDb : r.CarrierDb;
+    private string SpectralMetric => _hdSeen ? "sideband SNR" : "carrier SNR";
+
+    private void NoteHd(SignalQuality.Reading r)
     {
-        var st = _e.Receiver.Stereo;
-        if (st.PilotLocked) return (st.PilotSnrDb, "pilot SNR");
-        double r = Math.Max(1e-3, _e.Receiver.Equalizer.Ripple);
-        return (-20 * Math.Log10(r), "ripple");
+        if (_hdSeen || !(r.HdVisible || _e.Hd.Synced)) return;
+        _hdSeen = true;
+        _hdChannels.Add(Channel(_e.Frequency));
     }
 
-    /// <summary>Averages the fast metric over a window; NaN if the station changed or clipped meanwhile.</summary>
-    private async Task<double> MeasureFast(double settle, double window, CancellationToken ct)
+    private double Top(Dictionary<int, SignalQuality.Reading> seen)
     {
-        if (!await Wait(settle, ct)) return double.NaN;
-        double sum = 0; int n = 0;
-        var until = DateTime.UtcNow.AddSeconds(window);
-        while (DateTime.UtcNow < until)
-        {
-            if (!await Wait(0.1, ct)) return double.NaN;
-            var (s, m) = FastScore();
-            sum += s; n++; Metric = m;
-        }
-        return n > 0 ? sum / n : double.NaN;
+        double top = double.NegativeInfinity;
+        foreach (var q in seen.Values) top = Math.Max(top, Score(q));
+        return top;
+    }
+
+    /// <summary>The lowest gain that scores as good as the best.</summary>
+    private int Pick(Dictionary<int, SignalQuality.Reading> seen)
+    {
+        double top = Top(seen);
+        int pick = int.MaxValue;
+        foreach (var (i, q) in seen) if (Score(q) >= top - AsGood && i < pick) pick = i;
+        return pick;
     }
 
     /// <summary>
-    /// Finds the highest gain that doesn't clip, then backs off one step for headroom. The RTL's noise figure keeps
-    /// improving with gain right up to where the ADC saturates (98.5: MER flat at 12 dB from 7.7 to 16.6 dB, then a
-    /// cliff), and the pilot/ripple metrics are too flat on strong stations to steer by, so clipping is the guide here
-    /// and the quality metrics fine-tune afterwards.
+    /// Peaks the gain on the spectral score, with clipping as a hard ceiling. From the remembered (or current) gain it
+    /// walks up two steps at a time until the score falls past its best; if nothing up there beat the start, down while
+    /// it stays as good as the best; then it tries the steps either side of the pick. Of the gains as good as the best
+    /// it takes the lowest: headroom for the music's peaks and less for the tuner to overload on. Climbing to the first
+    /// clip instead put 104.9 at ~20 dB, deep in the tuner's overload from 105.3-105.7, where its HD couldn't sync (it
+    /// peaks at 7.7 dB: MER 9-10.7, and no sync at all from 16.6 up).
     /// </summary>
     private async Task Acquire(CancellationToken ct)
     {
         State = Phase.Acquiring;
-        Metric = "clipping";
+        Metric = "spectrum";
+        _acquired = false;
+        _hdSeen = _hdChannels.Contains(Channel(_e.Frequency));
         if (_best.TryGetValue(Channel(_e.Frequency), out int known)) Apply(known);
         if (!await Wait(0.8, ct)) return;   // retune skip
 
-        double clip = await MeasureClip(ct);
-        if (double.IsNaN(clip)) return;
-        if (clip > ClipLimit)
+        var r = await Measure(ct);
+        if (r is null) return;
+        // too hot: step down until it isn't
+        while (r.Value.clip > ClipLimit && _idx > 0)
         {
-            // too hot: step down until it isn't
-            while (clip > ClipLimit && _idx > 0)
+            SetCeiling(_idx);
+            r = await MeasureAt(_idx - (r.Value.clip > 0.05 ? 3 : 1), ct);
+            if (r is null) return;
+        }
+        var seen = new Dictionary<int, SignalQuality.Reading> { [_idx] = r.Value.q };
+        int start = _idx;
+
+        // up while it isn't getting worse (a weak station's peak is broad: small steps add up)
+        for (int j = start + Stride; j < _gains.Count && BelowCeiling(j); j += Stride)
+        {
+            r = await MeasureAt(j, ct);
+            if (r is null) return;
+            if (r.Value.clip > ClipLimit) { SetCeiling(j); break; }
+            seen[j] = r.Value.q;
+            if (Score(r.Value.q) < Top(seen) - AsGood) break;   // past the peak
+        }
+        // nothing above beat the start: down while it stays as good
+        if (Score(seen[start]) >= Top(seen) - AsGood)
+        {
+            for (int j = start - Stride; j >= 0; j -= Stride)
             {
-                SetCeiling(_idx);
-                Apply(_idx - (clip > 0.05 ? 3 : 1));
-                clip = await MeasureClip(ct);
-                if (double.IsNaN(clip)) return;
+                r = await MeasureAt(j, ct);
+                if (r is null) return;
+                if (r.Value.clip > ClipLimit) break;
+                seen[j] = r.Value.q;
+                if (Score(r.Value.q) < Top(seen) - AsGood) break;
             }
         }
-        else
+        // the steps the walk skipped, either side of the pick
+        int pick = Pick(seen);
+        foreach (int j in new[] { pick - 1, pick + 1 })
         {
-            // climb until the first step that clips, then come back two (one for headroom)
-            while (_idx < _gains.Count - 1)
-            {
-                Apply(_idx + 1);
-                clip = await MeasureClip(ct);
-                if (double.IsNaN(clip)) return;
-                if (clip > ClipLimit) { SetCeiling(_idx); Apply(Math.Max(0, _idx - 2)); break; }
-            }
+            if (j < 0 || j >= _gains.Count || seen.ContainsKey(j) || (j > pick && !BelowCeiling(j))) continue;
+            r = await MeasureAt(j, ct);
+            if (r is null) return;
+            if (r.Value.clip > ClipLimit) { SetCeiling(j); continue; }
+            seen[j] = r.Value.q;
         }
-        if (!await Wait(0.3, ct)) return;
-        var (s, m) = FastScore();
-        LastScore = s; Metric = m;
+        pick = Pick(seen);
+        if (pick != _idx) Apply(pick);
+        LastScore = Score(seen[pick]);
+        Metric = SpectralMetric;
         Remember();
+        _acquiredAt = DateTime.UtcNow;
+        _acquired = true;
         State = Phase.Tracking;
     }
 
-    /// <summary>ADC clipping at the current gain: 100 ms to settle, then 450 ms measured. NaN if the station changed.</summary>
-    private async Task<double> MeasureClip(CancellationToken ct)
+    /// <summary>
+    /// ADC clipping and the spectrum at the current gain: 100 ms (plus the link's latency) to settle, then 450 ms
+    /// measured. Null if the station changed or no samples came.
+    /// </summary>
+    private async Task<(double clip, SignalQuality.Reading q)?> Measure(CancellationToken ct)
     {
         await Task.Delay(TimeSpan.FromMilliseconds(100) + _e.Device.ControlLatency, ct);
         _e.TakeClipFraction();
+        _e.TakeQuality();
         await Task.Delay(450, ct);   // long enough that a quiet moment in the music doesn't hide the peaks
-        if (!_enabled || _e.IsSeeking || _e.RetuneGeneration != _gen) return double.NaN;
+        if (!_enabled || _e.IsSeeking || _e.RetuneGeneration != _gen) return null;
         double clip = _e.TakeClipFraction();
+        var q = _e.TakeQuality();
+        if (q.Blocks == 0) return null;
         _clipRecent += 0.5 * (clip - _clipRecent);
-        return clip;
+        NoteHd(q);
+        return (clip, q);
+    }
+
+    private Task<(double clip, SignalQuality.Reading q)?> MeasureAt(int idx, CancellationToken ct)
+    {
+        Apply(idx);
+        return Measure(ct);
     }
 
     private int _probeDir = 1;
 
     private async Task Track(CancellationToken ct)
     {
-        if (!await Wait(12, ct)) return;   // quiet time between probes
+        // quiet time between probes: shorter for the first minute while the station's HD is on the air but not decoding
+        bool searching = _hdSeen && !_e.Hd.Synced && DateTime.UtcNow - _acquiredAt < TimeSpan.FromMinutes(1);
+        if (!await Wait(searching ? 5 : 12, ct)) return;
 
         bool hd = _e.Hd.Synced && _e.Hd.MerLower > 0;
-        string metric = hd ? "MER" : _e.Receiver.Stereo.PilotLocked ? "pilot SNR" : "ripple";
-        double margin = hd ? 0.3 : metric == "pilot SNR" ? 1.0 : 0.5;
-        double window = hd ? 3.2 : 1.2, settle = hd ? 1.6 : 0.6;
+        NoteHd(default);
+        string metric = hd ? "MER" : SpectralMetric;
+        double margin = hd ? 0.3 : Better;
+        double window = hd ? 3.2 : 0.8;
+        double settle = hd ? 1.6 : 0.1 + _e.Device.ControlLatency.TotalSeconds;
 
-        double baseline = await Score(metric, 0, window, ct);
+        double baseline = await Sample(metric, 0, window, ct);
         if (double.IsNaN(baseline)) return;
         int from = _idx, to = _idx + _probeDir;
         _probeDir = -_probeDir;   // alternate up and down
@@ -268,7 +340,7 @@ public sealed class GainOptimizer : IDisposable
         if (to > from && (_clipRecent > ClipLimit || !BelowCeiling(to))) return;   // known cliff: don't probe up
 
         Apply(to);
-        double probe = await Score(metric, settle, window, ct);
+        double probe = await Sample(metric, settle, window, ct);
         if (to > from && _clipRecent > ClipLimit) SetCeiling(to);   // found the edge while probing
         if (double.IsNaN(probe))
         {
@@ -287,31 +359,28 @@ public sealed class GainOptimizer : IDisposable
         Metric = metric;
     }
 
-    private async Task<double> Score(string metric, double settle, double window, CancellationToken ct)
+    /// <summary>The metric averaged over a window after settling; NaN if the station changed, HD was lost or it clipped.</summary>
+    private async Task<double> Sample(string metric, double settle, double window, CancellationToken ct)
     {
         if (settle > 0 && !await Wait(settle, ct)) return double.NaN;
+        if (metric != "MER")
+        {
+            _e.TakeQuality();
+            if (!await Wait(window, ct)) return double.NaN;
+            var q = _e.TakeQuality();
+            if (q.Blocks == 0) return double.NaN;
+            NoteHd(q);
+            return metric == "sideband SNR" ? q.SidebandDb : q.CarrierDb;
+        }
         double sum = 0; int n = 0;
         var until = DateTime.UtcNow.AddSeconds(window);
         while (DateTime.UtcNow < until)
         {
             if (!await Wait(0.1, ct)) return double.NaN;
-            double v;
-            if (metric == "MER")
-            {
-                var h = _e.Hd;
-                if (!h.Synced) return double.NaN;   // lost HD at this gain: definitely worse
-                v = (h.MerLower + h.MerUpper) / 2;
-            }
-            else if (metric == "pilot SNR")
-            {
-                var st = _e.Receiver.Stereo;
-                if (!st.PilotLocked) return double.NaN;
-                v = st.PilotSnrDb;
-            }
-            else v = -20 * Math.Log10(Math.Max(1e-3, _e.Receiver.Equalizer.Ripple));
-            sum += v; n++;
+            var h = _e.Hd;
+            if (!h.Synced) return double.NaN;   // lost HD at this gain: definitely worse
+            sum += (h.MerLower + h.MerUpper) / 2; n++;
         }
-        Metric = metric;
         return n > 0 ? sum / n : double.NaN;
     }
 
