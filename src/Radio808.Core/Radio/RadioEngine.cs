@@ -433,6 +433,7 @@ public sealed class RadioEngine : IDisposable
             _skip = (int)((RetuneSkipSeconds + _dev.ControlLatency.TotalSeconds) * FmReceiver.DeviceRate);   // complex samples
             _rx.Reset();
             _hd.Retune();
+            _quality.Reset();
         }
         if (_skip > 0)
         {
@@ -445,10 +446,15 @@ public sealed class RadioEngine : IDisposable
         Interlocked.Add(ref _clipCount, clip);
         Interlocked.Add(ref _sampleCount, iq.Length);
         CaptureDevice(iq);
+        _quality.Add(iq);
         _rx.Process(iq);
     }
 
     private long _clipCount, _sampleCount;
+    private readonly SignalQuality _quality = new();
+
+    /// <summary>The station's carrier and HD sidebands over the noise floor, averaged since the last call.</summary>
+    internal SignalQuality.Reading TakeQuality() => _quality.Take();
 
     /// <summary>Fraction of ADC samples at full scale since the last call.</summary>
     public double TakeClipFraction()

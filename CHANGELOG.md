@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Automatic gain peaks HD stations next to a strong neighbour.** It climbed until the ADC clipped, but beside a
+  strong station the tuner overloads well before that: the noise floor rises faster than the gain while nothing clips.
+  104.9 beside the 105.3-105.7 cluster ended up near 20 dB, where its HD never synced; its peak is 7.7 dB. The gain is
+  now steered by the station's spectrum across the dongle's whole window: the HD sidebands over the noise floor once a
+  station shows them (before HD syncs, so there's no chicken-and-egg), the analog carrier otherwise, with clipping
+  still the ceiling. 104.9 now syncs in about 5 s at MER 9-10 dB; 98.5 and 107.7 land on their peaks as before.
+  Until HD decodes, tracking probes every ~7 s (was ~15 s) for the first minute. Both platforms.
+- An acquisition cut short by the overload guard (a hot station tuned at a high gain) now starts over instead of
+  leaving the gain to the slow tracking probes.
+
 ## 0.8.0 (2026-10-04)
 
 - **Presets remember the HD program.** Save a preset while on HD2 (or HD3 ...) and recalling it selects that program,
