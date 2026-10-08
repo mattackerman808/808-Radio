@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.2 (2026-10-08)
 
 - **Automatic gain takes the top of a flat peak, not the bottom.** On a weak HD station the spectral score barely
   moves across a wide range of gain, but MER still creeps up with it (the ADC's quantization noise counts for less):
@@ -11,7 +11,8 @@
   (MER 7.8, 5.8, 2.5 at 15.7), so it now takes 8.7 rather than the edge. A sharp peak stays where it is.
 - Tools: `R808_GAINTRACE=1` prints every gain measurement and decision to stderr; `gainsweep` takes a network
   dongle (`R808_RTLTCP`), sweeps up and back down, can be limited (`R808_SWEEP=8,30`) and shows the spectral score;
-  `play` can be muted for unattended tests (`R808_MUTE=1`).
+  `play` can be muted for unattended tests (`R808_MUTE=1`); `watch 91.1@20.7,104.9@7.7` cycles stations at fixed
+  gains and prints MER every visit, for aiming an antenna.
 
 ## 0.8.1 (2026-10-07)
 
