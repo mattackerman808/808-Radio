@@ -111,12 +111,15 @@ internal static class HdTools
     }
 
     /// <summary>
-    /// For each tuner gain: pilot SNR, envelope ripple, ADC clipping, and HD MER (full chain, muted), to see which fast
-    /// metric peaks where HD quality does.
+    /// For each tuner gain: pilot SNR, envelope ripple, ADC clipping, HD MER (full chain, muted) and the gain
+    /// optimizer's spectral score (HD sidebands over the floor), to see which fast metric peaks where HD quality does.
     /// </summary>
     public static int GainSweep(double mhz, double settle, double measure)
     {
-        using var radio = RadioEngine.StartAsync((long)Math.Round(mhz * 1e6)).GetAwaiter().GetResult();
+        var net = Environment.GetEnvironmentVariable("R808_RTLTCP");   // a network dongle, as for play
+        using var radio = (net is { Length: > 0 }
+            ? RadioEngine.StartAsync(new Radio808.Core.Devices.RtlTcpSource(net), (long)Math.Round(mhz * 1e6), 16.6)
+            : RadioEngine.StartAsync((long)Math.Round(mhz * 1e6), null, 16.6)).GetAwaiter().GetResult();
         radio.Muted = true;
         long clipped = 0, samples = 0;
         bool count = false;
@@ -128,14 +131,17 @@ internal static class HdTools
         };
         Console.WriteLine($"{mhz:F1} MHz: waiting for HD...");
         for (int i = 0; i < 30 && !radio.Hd.Synced; i++) Thread.Sleep(500);
-        var gains = ((Radio808.Core.Devices.RtlSdrDevice)radio.Device).Gains;
-        Console.WriteLine("  gain  pilotSNR  ripple   clip%    MER   (HD sync)");
+        // up then back down, so drift in the station's signal shows; R808_SWEEP="8,30" limits the range (dB)
+        var range = Environment.GetEnvironmentVariable("R808_SWEEP") is { } r
+            ? r.Split(',').Select(v => double.Parse(v, CultureInfo.InvariantCulture)).ToArray() : new[] { 5.0, 45 };
+        var up = radio.Device.Gains.Where(g => g >= range[0] && g <= range[1]).ToList();
+        var gains = up.Concat(Enumerable.Reverse(up)).ToList();
+        Console.WriteLine("  gain  pilotSNR  ripple   clip%    MER   (HD sync)  sbSNR floor");
         foreach (var g in gains)
         {
-            if (g < 5 || g > 45) continue;
             radio.Gain = g;
             Thread.Sleep(TimeSpan.FromSeconds(settle));
-            clipped = samples = 0; count = true;
+            clipped = samples = 0; count = true; radio.TakeQuality();
             double snr = 0, rip = 0, mer = 0; int n = 0, merN = 0, syncN = 0;
             var sw = Stopwatch.StartNew();
             while (sw.Elapsed.TotalSeconds < measure)
@@ -146,9 +152,65 @@ internal static class HdTools
                 if (hd.Synced) { syncN++; if (hd.MerLower > 0) { mer += (hd.MerLower + hd.MerUpper) / 2; merN++; } }
             }
             count = false;
-            Console.WriteLine($"{g,6:F1} {snr / n,9:F1} {rip / n,7:F3} {100.0 * clipped / Math.Max(1, samples),7:F3} {(merN > 0 ? (mer / merN).ToString("F1") : "  -"),6}   {syncN}/{n}");
+            var q = radio.TakeQuality();
+            Console.WriteLine($"{g,6:F1} {snr / n,9:F1} {rip / n,7:F3} {100.0 * clipped / Math.Max(1, samples),7:F3} {(merN > 0 ? (mer / merN).ToString("F1") : "  -"),6}   {syncN}/{n}   {q.SidebandDb,5:F1} {q.FloorDb,5:F1}");
         }
         return 0;
+    }
+
+    /// <summary>
+    /// For aiming the antenna: cycles through stations at fixed gains on one connection, a line per station per visit
+    /// (wall-clock time, MER, sidebands over the floor, BER, clipping), until Ctrl+C. stations: "91.1@20.7,104.9@7.7".
+    /// With fixed gains a change is the antenna's, not the gain optimizer's. R808_RTLTCP as for play.
+    /// </summary>
+    public static int Watch(string stations, double dwell)
+    {
+        var list = stations.Split(',').Select(t => t.Split('@'))
+            .Select(p => (Hz: (long)Math.Round(double.Parse(p[0], CultureInfo.InvariantCulture) * 1e6), Gain: double.Parse(p[1], CultureInfo.InvariantCulture)))
+            .ToList();
+        var net = Environment.GetEnvironmentVariable("R808_RTLTCP");
+        using var radio = (net is { Length: > 0 }
+            ? RadioEngine.StartAsync(new Radio808.Core.Devices.RtlTcpSource(net), list[0].Hz, list[0].Gain)
+            : RadioEngine.StartAsync(list[0].Hz, null, list[0].Gain)).GetAwaiter().GetResult();
+        radio.Muted = true;
+        long clipped = 0, samples = 0;
+        bool count = false;
+        radio.Device.Samples += iq =>
+        {
+            if (!count) return;
+            for (int i = 0; i < iq.Length; i++) if (Math.Abs(iq[i]) > 0.98f) clipped++;
+            samples += iq.Length;
+        };
+        Console.WriteLine("time      station  gain   MER lo/up    sync   sbSNR  BER     clip%");
+        for (int visit = 0; ; visit++)
+        {
+            var (hz, gain) = list[visit % list.Count];
+            double settle = 0;
+            if (radio.Frequency != hz || radio.CurrentGainDb != gain || visit == 0)
+            {
+                radio.Gain = gain;
+                radio.Frequency = hz;
+                settle = Math.Min(8, dwell / 2);   // HD sync takes a few seconds; MER comes before audio
+                Thread.Sleep(TimeSpan.FromSeconds(settle));
+            }
+            clipped = samples = 0; count = true; radio.TakeQuality();
+            double lo = 0, up = 0, ber = 0; int n = 0, merN = 0, berN = 0, syncN = 0;
+            var sw = Stopwatch.StartNew();
+            while (sw.Elapsed.TotalSeconds < dwell - settle)
+            {
+                Thread.Sleep(250);
+                var hd = radio.Hd; n++;
+                if (!hd.Synced) continue;
+                syncN++;
+                if (hd.MerLower > 0) { lo += hd.MerLower; up += hd.MerUpper; merN++; }
+                if (hd.BerAvg >= 0) { ber += hd.BerAvg; berN++; }
+            }
+            count = false;
+            var q = radio.TakeQuality();
+            string mer = merN > 0 ? $"{(lo + up) / 2 / merN,4:F1} {lo / merN,4:F1}/{up / merN,4:F1}" : "   -          ";
+            Console.WriteLine($"{DateTime.Now:HH:mm:ss}  {hz / 1e6,5:F1}  {gain,5:F1}  {mer}  {100 * syncN / Math.Max(1, n),3}%  {q.SidebandDb,5:F1}  " +
+                $"{(berN > 0 ? (ber / berN).ToString("F4") : "  -   ")}  {100.0 * clipped / Math.Max(1, samples),6:F3}");
+        }
     }
 
     /// <summary>Checks the carrier-offset PPM measurement: deliberately mis-set corrections should read back.</summary>
@@ -213,6 +275,7 @@ internal static class HdTools
             ? RadioEngine.StartAsync(new Radio808.Core.Devices.RtlTcpSource(net), (long)Math.Round(mhz * 1e6), gainDb)
             : RadioEngine.StartAsync((long)Math.Round(mhz * 1e6), null, gainDb)).GetAwaiter().GetResult();
         if (net is { Length: > 0 }) Console.WriteLine($"source: {radio.Device.Name}");
+        if (Environment.GetEnvironmentVariable("R808_MUTE") == "1") radio.Muted = true;   // unattended tests
         string? stopped = null;
         radio.DeviceStopped += m => stopped = m;
         Console.WriteLine($"playing {mhz:F1} MHz.  Keys: Left/Right tune 0.2 MHz, 1-8 HD program, A analog only, E equalizer, M mono, Q quit");

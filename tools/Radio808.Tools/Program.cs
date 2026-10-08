@@ -42,6 +42,7 @@ internal static class Program
 #endif
                 case "ppmtest": return HdTools.PpmTest(Mhz(args, 1, 98.5));
                 case "ctlstress": return HdTools.ControlStress(args.Length > 1 ? double.Parse(args[1]) : 20);
+                case "watch": return HdTools.Watch(args[1], args.Length > 2 ? double.Parse(args[2]) : 20);
                 case "gainsweep": return HdTools.GainSweep(Mhz(args, 1, 97.3), args.Length > 2 ? double.Parse(args[2]) : 2.5, args.Length > 3 ? double.Parse(args[3]) : 3);
                 default:
                     Console.WriteLine("usage: tools devices | probe <MHz> [s] | capture <MHz> <s> <out.cu8> [gain] | spectrum <in.cu8> | scan [gain]");

@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Radio808.Tools" />
+    <InternalsVisibleTo Include="radio808-tools" />
   </ItemGroup>
 
   <!-- Native libraries: native/bin/*.dll from build-native.sh (Windows), native/bin/*.dylib from native/mac/build-native-mac.sh -->
