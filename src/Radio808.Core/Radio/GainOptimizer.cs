@@ -46,6 +46,7 @@ public sealed class GainOptimizer : IDisposable
     private volatile bool _enabled;
     private Task? _loop;
     private double _clipRecent;
+    private double _clipSlow;   // the soft guard's slow average, from the last gain change
     private DateTime? _hotSince;
 
     public Phase State { get; private set; } = Phase.Off;
@@ -91,6 +92,7 @@ public sealed class GainOptimizer : IDisposable
         _e.ApplyGain(_gains[_idx]);
         _e.TakeClipFraction();   // measurements start fresh at the new gain
         _e.TakeQuality();
+        _clipSlow = 0;
         // a network dongle's samples from before the change are still arriving for a while: don't judge by them
         _settleUntil = DateTime.UtcNow + _e.Device.ControlLatency;
     }
@@ -156,11 +158,15 @@ public sealed class GainOptimizer : IDisposable
                 Remember();
                 return false;
             }
-            // soft guard: light but persistent clipping already costs HD MER
+            // soft guard: light but persistent clipping already costs HD MER. Either a couple of seconds over twice the
+            // limit, or the slow average over the limit itself, where OVL is lit: without it a gain clipping 0.02-0.04%
+            // stayed there with the light on for good (91.1 at 20.7 dB, one step under a 3% cliff, 2026-10-08)
+            _clipSlow += 0.03 * (clip - _clipSlow);   // ~3 s
             if (_clipRecent > 2 * ClipLimit) _hotSince ??= DateTime.UtcNow; else _hotSince = null;
-            if (_hotSince is DateTime hot && DateTime.UtcNow - hot > TimeSpan.FromSeconds(2) && _idx > 0)
+            bool hotFast = _hotSince is DateTime hot && DateTime.UtcNow - hot > TimeSpan.FromSeconds(2);
+            if ((hotFast || _clipSlow > ClipLimit) && _idx > 0)
             {
-                Trace($"guard: steady clipping {_clipRecent * 100:F3}%, down");
+                Trace($"guard: steady clipping {_clipRecent * 100:F3}% (slow {_clipSlow * 100:F3}%), down");
                 _hotSince = null;
                 SetCeiling(_idx);
                 Apply(_idx - 1);
@@ -281,6 +287,7 @@ public sealed class GainOptimizer : IDisposable
         State = Phase.Acquiring;
         Metric = "spectrum";
         _acquired = false;
+        _clipSlow = 0;
         _hdSeen = _hdChannels.Contains(Channel(_e.Frequency));
         if (_best.TryGetValue(Channel(_e.Frequency), out int known)) Apply(known);
         Trace($"acquire: hd seen {_hdSeen}, {(_best.ContainsKey(Channel(_e.Frequency)) ? "remembered" : "starting at")} {_gains[_idx]}");

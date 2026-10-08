@@ -9,6 +9,9 @@
   20.7 again. It also stays two steps under where the score falls off, the tuner overloading on a neighbour, which
   the ADC doesn't see: without a masthead amp 104.9 scored the same from 7.7 to 12.5 dB and fell off a cliff at 14.4
   (MER 7.8, 5.8, 2.5 at 15.7), so it now takes 8.7 rather than the edge. A sharp peak stays where it is.
+- **OVL no longer stays lit.** The light comes on at 0.02% clipping, but the gain only stepped down at 0.04% held for
+  2 s, so a gain clipping in between stayed there with OVL lit for good (91.1 at 20.7 dB, one step under a 3% cliff).
+  Clipping that stays over 0.02% on average for about 3 s now steps it down, the same level that lights OVL.
 - Tools: `R808_GAINTRACE=1` prints every gain measurement and decision to stderr; `gainsweep` takes a network
   dongle (`R808_RTLTCP`), sweeps up and back down, can be limited (`R808_SWEEP=8,30`) and shows the spectral score;
   `play` can be muted for unattended tests (`R808_MUTE=1`); `watch 91.1@20.7,104.9@7.7` cycles stations at fixed
