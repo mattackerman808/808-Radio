@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,7 +18,7 @@ namespace Radio808.Core.Radio;
 /// <item>An overload guard (every 100 ms) drops a step as soon as clipping exceeds <see cref="ClipHigh"/>.</item>
 /// <item>After each tune, acquisition backs off any overload, then walks the gain on the spectral score (the HD
 ///   sidebands over the floor once the station has shown them, else the carrier), with clipping as a ceiling,
-///   preferring the lowest gain that's as good as the best.</item>
+///   preferring the highest gain that's as good as the best and two steps under clipping or a fall in the score.</item>
 /// <item>Then tracking: every ~15 s (~7 s while HD is on the air but not yet decoding) it tries one step up or down
 ///   against a fresh baseline and keeps it only if the score clearly improves. With HD synced the metric is nrsc5's
 ///   MER, which is what matters for HD.</item>
@@ -96,6 +97,14 @@ public sealed class GainOptimizer : IDisposable
 
     private DateTime _settleUntil;
 
+    // R808_GAINTRACE=1: every measurement and decision to stderr (the tools' play shows it beside the status lines)
+    private static readonly bool Tracing = Environment.GetEnvironmentVariable("R808_GAINTRACE") == "1";
+    private static readonly DateTime TraceStart = DateTime.UtcNow;
+    private void Trace(string m)
+    {
+        if (Tracing) Console.Error.WriteLine($"  ~{(DateTime.UtcNow - TraceStart).TotalSeconds,6:F1}s gain {_gains[_idx],4:F1} {m}");
+    }
+
     // ------------------------------------------------------------------ the loop
 
     private async Task Run(CancellationToken ct)
@@ -140,6 +149,7 @@ public sealed class GainOptimizer : IDisposable
             _clipRecent += 0.3 * (clip - _clipRecent);
             if (clip > ClipHigh && _idx > 0)
             {
+                Trace($"guard: clipping {clip * 100:F3}%, down");
                 SetCeiling(_idx);
                 Apply(_idx - (clip > 0.05 ? 3 : 1));   // the front end fell off: back down now
                 Moves++;
@@ -150,6 +160,7 @@ public sealed class GainOptimizer : IDisposable
             if (_clipRecent > 2 * ClipLimit) _hotSince ??= DateTime.UtcNow; else _hotSince = null;
             if (_hotSince is DateTime hot && DateTime.UtcNow - hot > TimeSpan.FromSeconds(2) && _idx > 0)
             {
+                Trace($"guard: steady clipping {_clipRecent * 100:F3}%, down");
                 _hotSince = null;
                 SetCeiling(_idx);
                 Apply(_idx - 1);
@@ -186,8 +197,8 @@ public sealed class GainOptimizer : IDisposable
     private const int Stride = 2;            // gain steps per move while walking (the R820T's are 0.9-5 dB)
     private const double Better = 0.5;       // dB: a clear improvement (tracking)
     /// <summary>
-    /// dB: as good as the best, so the lower gain wins. Small: on a weak station the peak is broad (107.7: sidebands
-    /// 8.5 dB over the floor at 2.7 dB gain, 9.6 at 16.6-22.9, MER 6.5 -> 7.3), and every half dB of MER counts there.
+    /// dB: as good as the best. Small: on a weak station the peak is broad (107.7: sidebands 8.5 dB over the floor at
+    /// 2.7 dB gain, 9.6 at 16.6-22.9, MER 6.5 -> 7.3), and every half dB of MER counts there.
     /// </summary>
     private const double AsGood = 0.25;
 
@@ -213,22 +224,57 @@ public sealed class GainOptimizer : IDisposable
         return top;
     }
 
-    /// <summary>The lowest gain that scores as good as the best.</summary>
+    /// <summary>
+    /// The highest gain that scores as good as the best with headroom (<see cref="Headroom"/>); the lowest as good if
+    /// none has it. On a flat peak the score can't tell the gains apart but MER can, a little: 91.1 (2026-10-08,
+    /// MER ~5) scored 6.6-7.0 from 8.7 to 20.7 dB gain while its MER rose 0.2-0.3 dB, and taking the lowest as good
+    /// put it at 14.4. The ADC's quantization noise counts for less the higher the gain, up to where it clips.
+    /// </summary>
     private int Pick(Dictionary<int, SignalQuality.Reading> seen)
     {
         double top = Top(seen);
-        int pick = int.MaxValue;
-        foreach (var (i, q) in seen) if (Score(q) >= top - AsGood && i < pick) pick = i;
-        return pick;
+        int cap = FallCap(seen);
+        int high = -1, low = int.MaxValue;
+        foreach (var (i, q) in seen)
+        {
+            if (Score(q) < top - AsGood) continue;
+            low = Math.Min(low, i);
+            if (Headroom(i, cap)) high = Math.Max(high, i);
+        }
+        return high >= 0 ? high : low;
     }
+
+    /// <summary>
+    /// The highest gain to pick on a plateau: two steps under the lowest gain above the best where the score has fallen
+    /// off (the tuner overloading on a neighbour, which the ADC doesn't see), but never under the best itself: on a
+    /// sharp peak the next step up has already fallen. int.MaxValue if nothing fell.
+    /// </summary>
+    private int FallCap(Dictionary<int, SignalQuality.Reading> seen)
+    {
+        double top = Top(seen);
+        int best = int.MaxValue;
+        foreach (var (i, q) in seen) if (Score(q) == top) best = Math.Min(best, i);
+        int fall = int.MaxValue;
+        foreach (var (i, q) in seen) if (i > best && Score(q) < top - AsGood) fall = Math.Min(fall, i);
+        return fall == int.MaxValue ? fall : Math.Max(best, fall - 2);
+    }
+
+    /// <summary>
+    /// Two steps under the lowest gain seen clipping, for the music's peaks, and no higher than <see cref="FallCap"/>:
+    /// the edge of an overload cliff moves with the neighbours' modulation. Without the masthead amp 104.9 scored flat
+    /// from 7.7 to 12.5 dB gain and fell at 14.4 (MER 7.8 -> 5.8 -> 2.5 at 15.7): 12.5 is as good as 8.7 but on the
+    /// edge. With the amp its peak is sharp (7.7: 10.9 dB, 8.7: 10.3) and stays at 7.7.
+    /// </summary>
+    private bool Headroom(int idx, int cap) => BelowCeiling(idx + 1) && idx <= cap;
 
     /// <summary>
     /// Peaks the gain on the spectral score, with clipping as a hard ceiling. From the remembered (or current) gain it
     /// walks up two steps at a time until the score falls past its best; if nothing up there beat the start, down while
     /// it stays as good as the best; then it tries the steps either side of the pick. Of the gains as good as the best
-    /// it takes the lowest: headroom for the music's peaks and less for the tuner to overload on. Climbing to the first
-    /// clip instead put 104.9 at ~20 dB, deep in the tuner's overload from 105.3-105.7, where its HD couldn't sync (it
-    /// peaks at 7.7 dB: MER 9-10.7, and no sync at all from 16.6 up).
+    /// it takes the highest with two steps of headroom under clipping and under where the score falls off
+    /// (<see cref="Pick"/>). Climbing to the first clip regardless of the score put 104.9 at ~20 dB, deep in the
+    /// tuner's overload from 105.3-105.7, where its HD couldn't sync (it peaks sharply at 7.7 dB: MER 9-10.7, and no
+    /// sync at all from 16.6 up).
     /// </summary>
     private async Task Acquire(CancellationToken ct)
     {
@@ -237,6 +283,7 @@ public sealed class GainOptimizer : IDisposable
         _acquired = false;
         _hdSeen = _hdChannels.Contains(Channel(_e.Frequency));
         if (_best.TryGetValue(Channel(_e.Frequency), out int known)) Apply(known);
+        Trace($"acquire: hd seen {_hdSeen}, {(_best.ContainsKey(Channel(_e.Frequency)) ? "remembered" : "starting at")} {_gains[_idx]}");
         if (!await Wait(0.8, ct)) return;   // retune skip
 
         var r = await Measure(ct);
@@ -276,7 +323,7 @@ public sealed class GainOptimizer : IDisposable
         int pick = Pick(seen);
         foreach (int j in new[] { pick - 1, pick + 1 })
         {
-            if (j < 0 || j >= _gains.Count || seen.ContainsKey(j) || (j > pick && !BelowCeiling(j))) continue;
+            if (j < 0 || j >= _gains.Count || seen.ContainsKey(j) || (j > pick && !Headroom(j, FallCap(seen)))) continue;
             r = await MeasureAt(j, ct);
             if (r is null) return;
             if (r.Value.clip > ClipLimit) { SetCeiling(j); continue; }
@@ -286,6 +333,8 @@ public sealed class GainOptimizer : IDisposable
         if (pick != _idx) Apply(pick);
         LastScore = Score(seen[pick]);
         Metric = SpectralMetric;
+        Trace($"acquire: pick {_gains[pick]} at {LastScore:F1} dB {Metric} of " +
+              string.Join(" ", seen.OrderBy(kv => kv.Key).Select(kv => $"{_gains[kv.Key]}:{Score(kv.Value):F1}")));
         Remember();
         _acquiredAt = DateTime.UtcNow;
         _acquired = true;
@@ -308,6 +357,8 @@ public sealed class GainOptimizer : IDisposable
         if (q.Blocks == 0) return null;
         _clipRecent += 0.5 * (clip - _clipRecent);
         NoteHd(q);
+        Trace($"measure: clip {clip * 100:F3}%, floor {q.FloorDb:F1}, carrier {q.CarrierDb:F1}, sidebands {q.LowerDb:F1}/{q.UpperDb:F1} " +
+              $"(gap {q.GapDb:F1}{(q.HdVisible ? ", visible" : "")}){(_e.Hd.Synced ? ", HD synced" : "")}");
         return (clip, q);
     }
 
@@ -344,11 +395,13 @@ public sealed class GainOptimizer : IDisposable
         if (to > from && _clipRecent > ClipLimit) SetCeiling(to);   // found the edge while probing
         if (double.IsNaN(probe))
         {
+            Trace($"track: {metric} {_gains[from]} -> {_gains[to]}: {baseline:F2} -> lost (HD, clipping or the station)");
             if (_e.RetuneGeneration == _gen && _idx == to) { Apply(from); if (to > from) SetCeiling(to); }   // HD lost or clipped
             return;
         }
         // keep the probe only if it's clearly better (ties stay put: no drifting)
         bool keep = probe > baseline + margin;
+        Trace($"track: {metric} {_gains[from]} -> {_gains[to]}: {baseline:F2} -> {probe:F2}{(keep ? ", kept" : "")}");
         if (keep) { Moves++; LastScore = probe; Remember(); }
         else
         {

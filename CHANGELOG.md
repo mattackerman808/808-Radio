@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Automatic gain takes the top of a flat peak, not the bottom.** On a weak HD station the spectral score barely
+  moves across a wide range of gain, but MER still creeps up with it (the ADC's quantization noise counts for less):
+  91.1 scored the same from 8.7 to 20.7 dB and 0.8.1 settled at 14.4, 0.2-0.3 dB of MER short of 20.7. Of the gains
+  as good as the best it now takes the highest that's two steps under clipping (as before 0.8.1), so 91.1 lands at
+  20.7 again. It also stays two steps under where the score falls off, the tuner overloading on a neighbour, which
+  the ADC doesn't see: without a masthead amp 104.9 scored the same from 7.7 to 12.5 dB and fell off a cliff at 14.4
+  (MER 7.8, 5.8, 2.5 at 15.7), so it now takes 8.7 rather than the edge. A sharp peak stays where it is.
+- Tools: `R808_GAINTRACE=1` prints every gain measurement and decision to stderr; `gainsweep` takes a network
+  dongle (`R808_RTLTCP`), sweeps up and back down, can be limited (`R808_SWEEP=8,30`) and shows the spectral score;
+  `play` can be muted for unattended tests (`R808_MUTE=1`).
+
 ## 0.8.1 (2026-10-07)
 
 - **Automatic gain peaks HD stations next to a strong neighbour.** It climbed until the ADC clipped, but beside a
