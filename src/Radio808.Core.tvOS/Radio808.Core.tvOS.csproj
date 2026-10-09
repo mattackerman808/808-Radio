@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The radio engine and the shared controller, compiled for tvOS: the same sources as Radio808.Core and
+       Radio808.Shared (linked in), with AVAudioEngine for the audio output instead of WASAPI / miniaudio. libnrsc5 is
+       linked statically into the app (native/tvos), so its P/Invokes use "__Internal" (Nrsc5Native.cs). -->
+  <PropertyGroup>
+    <TargetFramework>net9.0-tvos</TargetFramework>
+    <SupportedOSPlatformVersion>17.0</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>Radio808.Core</RootNamespace>
+    <AssemblyName>Radio808.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Radio808.Core\**\*.cs"
+             Exclude="..\Radio808.Core\bin\**;..\Radio808.Core\obj\**;..\Radio808.Core\Audio\WasapiAudioDevice.cs;..\Radio808.Core\Audio\MiniAudioDevice.cs"
+             LinkBase="Core" />
+    <Compile Include="..\Radio808.Shared\**\*.cs" Exclude="..\Radio808.Shared\bin\**;..\Radio808.Shared\obj\**" LinkBase="Shared" />
+  </ItemGroup>
+
+</Project>

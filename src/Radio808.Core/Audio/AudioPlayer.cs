@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Radio808.Core.Dsp;
 
@@ -20,6 +21,7 @@ public sealed class AudioPlayer : IDisposable
     private IAudioDevice? _out;
     private float[] _tmp = new float[0];
     private double _fillAvg = -1, _integ, _settle, _setpoint;
+    private bool _restarted;
 
     /// <summary>0..1 linear gain.</summary>
     public float Volume { get; set; } = 0.8f;
@@ -41,6 +43,7 @@ public sealed class AudioPlayer : IDisposable
     {
         var p = new AudioPlayer(inputRate);
         p._out = await AudioDevice.OpenAsync(OutputRate, 2, p._ring.Read).ConfigureAwait(false);
+        p._out.Restarted += () => { p._ring.DropToTarget(); Volatile.Write(ref p._restarted, true); };
         return p;
     }
 
@@ -53,6 +56,13 @@ public sealed class AudioPlayer : IDisposable
         // Ki = Kp^2 * 1000 / 4 makes it critically damped, with a time constant of 2 / (1000 Kp) = 13 s.
         // (+-1000 ppm is under 2 cents of pitch: inaudible.)
         double dt = stereo.Length / 2 / _inRate;
+        if (Volatile.Read(ref _restarted))
+        {
+            // a new output route has its own buffering and clock: measure the setpoint again, forget the old drift
+            Volatile.Write(ref _restarted, false);
+            _settle = 0; _fillAvg = -1; _integ = 0;
+            _resampler.Ratio = _inRate / OutputRate;
+        }
         double fill = BufferedMs;
         // The setpoint is the level the buffer settles at in the first 2 s (the device keeps part of the audio in its
         // own buffer, so it's below the priming level), so the loop only corrects drift, not startup.
@@ -103,6 +113,18 @@ public sealed class AudioPlayer : IDisposable
 
         public int Count { get { lock (_lock) return _count; } }
         public bool Primed { get; private set; }
+
+        /// <summary>Throws away whatever is queued beyond the target level (after the device restarted).</summary>
+        public void DropToTarget()
+        {
+            lock (_lock)
+            {
+                int extra = (_count - _target) & ~1;
+                if (extra <= 0) return;
+                _read = (_read + extra) % _buf.Length;
+                _count -= extra;
+            }
+        }
         public int Underruns { get; private set; }
 
         public void Write(ReadOnlySpan<float> data)

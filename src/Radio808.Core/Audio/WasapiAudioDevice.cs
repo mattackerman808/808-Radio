@@ -28,6 +28,8 @@ internal sealed class WasapiAudioDevice : IAudioDevice
 
     public string DeviceName => _out.DeviceFriendlyName ?? "";
 
+    public event Action? Restarted { add { } remove { } }   // the stream is reopened on the new default device with the ring left alone
+
     public void Dispose() => _out.Dispose();
 
     private sealed class PullProvider : ISampleProvider

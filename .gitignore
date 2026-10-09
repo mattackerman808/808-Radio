@@ -4,6 +4,8 @@ obj/
 /dist/
 /native/bin/
 /native/mac/prefix/
+/native/tvos/build/
+/native/tvos/lib/
 /nrsc5/build/
 /nrsc5/build-mac/
 /rtl-sdr/build-mac/

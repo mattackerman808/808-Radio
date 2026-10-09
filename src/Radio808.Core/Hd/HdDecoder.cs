@@ -86,10 +86,13 @@ public sealed unsafe class HdDecoder : IDisposable
     private int _dropped;
     private int _inFlight;
 
+    private readonly GCHandle _self;   // handed to nrsc5 as the opaque pointer, so the static callback finds us
+
     public HdDecoder(HdBlender blender)
     {
         _blender = blender;
-        _callback = OnEvent;
+        _callback = OnEventStatic;
+        _self = GCHandle.Alloc(this, GCHandleType.Weak);
     }
 
     public static string LibraryVersion => Nrsc5Native.Version();
@@ -220,7 +223,7 @@ public sealed unsafe class HdDecoder : IDisposable
         if (Nrsc5Native.nrsc5_open_pipe(out _nrsc5) != 0 || _nrsc5 == IntPtr.Zero)
             throw new InvalidOperationException("nrsc5_open_pipe failed");
         Nrsc5Native.nrsc5_set_mode(_nrsc5, Nrsc5Native.ModeFm);
-        Nrsc5Native.nrsc5_set_callback(_nrsc5, _callback, IntPtr.Zero);
+        Nrsc5Native.nrsc5_set_callback(_nrsc5, _callback, GCHandle.ToIntPtr(_self));
         Nrsc5Native.nrsc5_start(_nrsc5);
 
         _blender.Clear();
@@ -242,6 +245,15 @@ public sealed unsafe class HdDecoder : IDisposable
     }
 
     // ---- nrsc5 callbacks (worker thread) ----
+
+    /// <summary>Native code can only call a static method on tvOS (ahead-of-time compiled, no JIT): route to the instance.</summary>
+#if __TVOS__
+    [ObjCRuntime.MonoPInvokeCallback(typeof(Nrsc5Native.Callback))]
+#endif
+    private static void OnEventStatic(IntPtr e, IntPtr opaque)
+    {
+        if (GCHandle.FromIntPtr(opaque).Target is HdDecoder d) d.OnEvent(e, opaque);
+    }
 
     private void OnEvent(IntPtr e, IntPtr opaque)
     {
@@ -514,5 +526,6 @@ public sealed unsafe class HdDecoder : IDisposable
     {
         Stop();
         _queue.Dispose();
+        if (_self.IsAllocated) _self.Free();
     }
 }

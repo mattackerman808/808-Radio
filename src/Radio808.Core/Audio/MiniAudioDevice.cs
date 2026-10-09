@@ -40,6 +40,8 @@ internal sealed unsafe class MiniAudioDevice : IAudioDevice
 
     public static string LibraryVersion => Marshal.PtrToStringUTF8(r808audio_version()) ?? "";
 
+    public event Action? Restarted { add { } remove { } }   // miniaudio re-routes inside its own stream
+
     public string DeviceName => _device == IntPtr.Zero ? "" : Marshal.PtrToStringUTF8(r808audio_device_name(_device)) ?? "";
 
     private void OnRead(float* output, uint frames, IntPtr user)

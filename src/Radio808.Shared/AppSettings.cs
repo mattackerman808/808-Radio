@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Radio808.Shared;
 
@@ -59,18 +60,24 @@ public sealed class AppSettings
     public int PanelFps { get; set; }
     public static readonly int[] PanelFpsChoices = { 0, 120, 60, 30 };
     public int[]? WindowBounds { get; set; }
+    /// <summary>Apple TV: minutes without a remote press before the screen saver (0 = never).</summary>
+    public int SaverMinutes { get; set; } = 3;
 
     /// <summary>%APPDATA%\808Radio on Windows, ~/Library/Application Support/808Radio on macOS, ~/.config/808Radio elsewhere.</summary>
+#if __TVOS__
+    // tvOS apps may only write to Library/Caches (small, and the system may purge it) and tmp
+    public static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Caches", "808Radio");
+#else
     public static string Dir => OperatingSystem.IsMacOS()
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Application Support", "808Radio")
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "808Radio");
+#endif
     private static string FilePath => Path.Combine(Dir, "settings.json");
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     public static AppSettings Load()
     {
         AppSettings s;
-        try { s = File.Exists(FilePath) ? JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new() : new(); }
+        try { s = File.Exists(FilePath) ? JsonSerializer.Deserialize(File.ReadAllText(FilePath), SettingsJson.Default.AppSettings) ?? new() : new(); }
         catch { s = new(); }
         while (s.Presets.Count < PresetCount) s.Presets.Add(null);
         return s;
@@ -85,8 +92,18 @@ public sealed class AppSettings
         try
         {
             Directory.CreateDirectory(Dir);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, SettingsJson.Default.AppSettings));
         }
         catch { /* settings are a convenience; never crash over them */ }
     }
+}
+
+/// <summary>
+/// The settings' JSON code, generated at compile time: the trimmed tvOS build strips what reflection would need
+/// (setters nothing but the deserializer calls, like the preset list), and this works the same everywhere.
+/// </summary>
+[JsonSourceGenerationOptions(WriteIndented = true)]
+[JsonSerializable(typeof(AppSettings))]
+internal partial class SettingsJson : JsonSerializerContext
+{
 }

@@ -9,7 +9,11 @@ namespace Radio808.Core.Native;
 /// </summary>
 internal static unsafe class Nrsc5Native
 {
+#if __TVOS__
+    private const string Lib = "__Internal";   // libnrsc5.a is linked into the app (native/tvos)
+#else
     private const string Lib = "libnrsc5";
+#endif
 
     public const double SampleRateFm = 744187.5;
     public const int AudioSampleRate = 44100;

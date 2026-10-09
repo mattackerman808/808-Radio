@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 808 Radio for Apple TV: the engine from Radio808.Core.tvOS, fed by an rtl_tcp server on the network (there's no
+       USB on an Apple TV), with a UIKit shell driven from the Siri Remote. Build for the simulator (the default) with
+         dotnet build src/Radio808.TV
+       and for an Apple TV with
+         dotnet build src/Radio808.TV -r tvos-arm64 -c Release
+       (needs native/tvos/build-native-tvos.sh first). -->
+  <PropertyGroup>
+    <TargetFramework>net9.0-tvos</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>true</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <SupportedOSPlatformVersion>17.0</SupportedOSPlatformVersion>
+    <RootNamespace>Radio808.TV</RootNamespace>
+    <AssemblyName>808Radio</AssemblyName>
+    <ApplicationTitle>808 Radio</ApplicationTitle>
+    <ApplicationId>org.808.radio.tv</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">tvossimulator-arm64</RuntimeIdentifier>
+    <TrimMode Condition="'$(Configuration)' == 'Release'">full</TrimMode>
+    <!-- the .NET tvOS SDK insists on the Xcode it was built against (26.5); it works with the newer one installed -->
+    <ValidateXcodeVersion>false</ValidateXcodeVersion>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <NrscPlatform>appletvos</NrscPlatform>
+    <NrscPlatform Condition="$(RuntimeIdentifier.Contains('simulator'))">appletvsimulator</NrscPlatform>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- the shader is compiled on the Apple TV at run time, not by the build (which would need the Metal toolchain) -->
+    <Metal Remove="Visualizer.metal" />
+    <EmbeddedResource Include="Visualizer.metal" LogicalName="Radio808.TV.Visualizer.metal" />
+    <BundleResource Include="Assets\wood.jpg" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Radio808.Core.tvOS\Radio808.Core.tvOS.csproj" />
+    <!-- nrsc5 with FFTW and FAAD2 inside, from native/tvos/build-native-tvos.sh -->
+    <NativeReference Include="$(MSBuildThisFileDirectory)..\..\native\tvos\lib\$(NrscPlatform)\libnrsc5.a" Kind="Static" ForceLoad="true" />
+  </ItemGroup>
+
+</Project>
