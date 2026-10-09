@@ -273,6 +273,16 @@ internal sealed class MainWindow : Window
         m.Closed += (_, _) => { _c.DiscoveryChanged -= Refresh; _c.Settings.Save(); };
         _ = _c.DiscoverAsync();
         m.Items.Add(src);
+        m.Items.Add(Item("Server mode: share this dongle on the network", () => _c.SetServerMode(!_c.Settings.ServerMode), _c.Settings.ServerMode));
+        if (_c.ServerMode)
+        {
+            // a server: nothing to tune, nothing to display, just the window
+            m.Items.Add(new Separator());
+            m.Items.Add(Item("Always on top", () => { _c.Settings.AlwaysOnTop = !_c.Settings.AlwaysOnTop; Topmost = _c.Settings.AlwaysOnTop; }, _c.Settings.AlwaysOnTop));
+            m.Items.Add(Item("Minimize", () => WindowState = WindowState.Minimized));
+            m.Items.Add(Item("Quit", Close));
+            return m;
+        }
         m.Items.Add(Item("Auto HD", () => _c.SetForceAnalog(!_c.Settings.ForceAnalog), !_c.Settings.ForceAnalog));
         m.Items.Add(Item("Multipath equalizer", () => _c.SetEqualizer(!_c.Settings.Equalizer), _c.Settings.Equalizer));
         m.Items.Add(Item("Force mono", () => _c.SetForceMono(!_c.Settings.ForceMono), _c.Settings.ForceMono));

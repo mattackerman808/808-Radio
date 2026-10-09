@@ -60,6 +60,8 @@ public sealed class AppSettings
     public int PanelFps { get; set; }
     public static readonly int[] PanelFpsChoices = { 0, 120, 60, 30 };
     public int[]? WindowBounds { get; set; }
+    /// <summary>Server mode: share this computer's USB dongle on the network (rtl_tcp) instead of playing here.</summary>
+    public bool ServerMode { get; set; }
     /// <summary>Apple TV: minutes without a remote press before the screen saver (0 = never).</summary>
     public int SaverMinutes { get; set; } = 3;
 

@@ -37,6 +37,10 @@
     </dict>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_rtl-tcp._tcp</string>
+    </array>
     <key>NSLocalNetworkUsageDescription</key>
     <string>808 Radio streams from an RTL-SDR dongle on your network (rtl_tcp).</string>
     <key>XSAppIconAssets</key>

@@ -64,6 +64,10 @@ internal static unsafe class RtlSdrNative
     public static extern int rtlsdr_set_bias_tee(IntPtr dev, int on);
 
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int rtlsdr_set_direct_sampling(IntPtr dev, int on);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int rtlsdr_set_offset_tuning(IntPtr dev, int on);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     public static extern int rtlsdr_reset_buffer(IntPtr dev);
 
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]

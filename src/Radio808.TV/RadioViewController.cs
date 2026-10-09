@@ -21,6 +21,7 @@ public sealed class RadioViewController : UIViewController
     private DateTime _lastActivity = DateTime.UtcNow;
     private VisualizerView? _saver;
     private SetupView? _setup;
+    private readonly BonjourBrowser _servers = new();
     private UIView _panel = null!;
     private UIView? _lastFocused;
 
@@ -97,6 +98,7 @@ public sealed class RadioViewController : UIViewController
 
         ApplyLit();
         KeyButton.Activity += Touch;
+        _servers.Changed += () => AppLog.Write("servers on the network: " + string.Join(", ", _servers.Servers.Select(f => $"{f.Name} ({f.Address})")));
         _timer = NSTimer.CreateRepeatingScheduledTimer(0.05, _ => Tick());
         // for screenshots from the shell: launch with --setup or --saver to open one right away
         var args = NSProcessInfo.ProcessInfo.Arguments;
@@ -270,7 +272,22 @@ public sealed class RadioViewController : UIViewController
 
     // ---- the rtl_tcp server
 
+    /// <summary>The servers found on the network (a Pi, or a Mac or PC in server mode) to pick from, or an address to type.</summary>
     private void AskServer()
+    {
+        var found = _servers.Servers;
+        var sheet = UIAlertController.Create("Dongle server", found.Count > 0 ? "Found on the network" : "None found on the network yet", UIAlertControllerStyle.ActionSheet);
+        foreach (var f in found)
+        {
+            bool current = string.Equals(_c.Settings.RtlTcpAddress, f.Address, StringComparison.OrdinalIgnoreCase);
+            sheet.AddAction(UIAlertAction.Create(current ? $"{f.Name}  ✓" : f.Name, UIAlertActionStyle.Default, _ => _c.SetSource(f.Address)));
+        }
+        sheet.AddAction(UIAlertAction.Create("Enter an address…", UIAlertActionStyle.Default, _ => AskServerAddress()));
+        sheet.AddAction(UIAlertAction.Create("Cancel", UIAlertActionStyle.Cancel, null));
+        PresentViewController(sheet, true, null);
+    }
+
+    private void AskServerAddress()
     {
         var alert = UIAlertController.Create("rtl_tcp server", "host or host:port of the machine with the dongle", UIAlertControllerStyle.Alert);
         alert.AddTextField(tf => { tf.Text = _c.Settings.RtlTcpAddress; tf.KeyboardType = UIKeyboardType.Url; tf.AutocapitalizationType = UITextAutocapitalizationType.None; });

@@ -36,8 +36,61 @@ public sealed class RadioController : IDisposable
 
     public long Frequency => Engine?.Frequency ?? (long)Math.Round(Settings.FrequencyMhz * 1e6);
 
+    // ---- server mode: the USB dongle served to other radios on the network ----
+
+    /// <summary>The dongle server (rtl_tcp protocol) while server mode is on.</summary>
+    public DongleServer? Server { get; private set; }
+    public bool ServerMode => Settings.ServerMode;
+
+    /// <summary>Switches server mode on (stops playing here, serves the dongle) or off (back to a radio).</summary>
+    public void SetServerMode(bool on)
+    {
+        Settings.ServerMode = on;
+        Settings.Save();
+        if (on)
+        {
+            StopEngine();
+            StartServer();
+        }
+        else
+        {
+            StopServer();
+            _ = StartAsync();
+        }
+        Changed?.Invoke();
+    }
+
+    private void StartServer()
+    {
+        if (Server != null) return;
+        Error = null;
+        try
+        {
+            var dongles = RtlSdrDevice.Enumerate();
+            if (dongles.Count == 0) throw new InvalidOperationException("No RTL-SDR to share. Plug in the dongle, then click to retry.");
+            var server = new DongleServer(dongles[0]);
+            server.Changed += () => _ui.Post(_ => Changed?.Invoke(), null);
+            server.Start();
+            Server = server;
+            AppLog.Write($"server mode: {server.ServiceName} on port {server.Port}, {server.Device}{(server.Advertised ? "" : " (not advertised: no Bonjour)")}");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write($"server mode: {ex.GetType().Name}: {ex.Message}");
+            Error = Friendly(ex);
+        }
+    }
+
+    private void StopServer()
+    {
+        var s = Server;
+        Server = null;
+        s?.Dispose();
+    }
+
     public async Task StartAsync()
     {
+        if (ServerMode) { if (Server == null) StartServer(); Changed?.Invoke(); return; }
         if (Engine != null || Starting) return;
         bool noUsbDongle = false;
         Starting = true;
@@ -432,6 +485,12 @@ public sealed class RadioController : IDisposable
     }
 
     public void Dispose()
+    {
+        StopServer();
+        DisposeRadio();
+    }
+
+    private void DisposeRadio()
     {
         _disposed = true;
         Settings.FrequencyMhz = Frequency / 1e6;

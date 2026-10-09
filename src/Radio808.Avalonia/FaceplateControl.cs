@@ -137,7 +137,7 @@ internal sealed class FaceplateControl : Control
         };
         _tick.Tick += (_, _) => Tick();
         _frames.Tick += (_, _) => Frame();
-        c.Changed += InvalidateVisual;
+        c.Changed += () => { if (_c.ServerMode && _open && !_animTimer.IsEnabled) ToggleOpen(); InvalidateVisual(); };
         c.Message += m => Flash(m, 2.5);
         _nerd = new NerdPanel(c);
         _spectrum = new SpectrumView(this) { IsHitTestVisible = false, ClipToBounds = true, IsVisible = false };
@@ -168,6 +168,7 @@ internal sealed class FaceplateControl : Control
     public void ToggleOpen()
     {
         if (_animTimer.IsEnabled) return;
+        if (_c.ServerMode && !_open) return;   // a server has no instrument panel
         _open = !_open;
         if (_open) OpenLayout?.Invoke(true);   // grow the window first, then fold the faceplate down
         _spectrum.IsVisible = false;
@@ -324,10 +325,55 @@ internal sealed class FaceplateControl : Control
     private void DrawFaceplate(DrawingContext g)
     {
         DrawBody(g);
+        if (_c.ServerMode) { DrawServerPanel(g); return; }   // not a radio now: the dongle is being served
         DrawKeyBlock(g);
         DrawDisplay(g);
         DrawKeyStrip(g);
         DrawRightSide(g);
+    }
+
+    /// <summary>
+    /// Server mode in place of the radio: one wide display saying what's being served to whom, and a key to stop.
+    /// The tuning, presets and knobs are gone because the client does the tuning.
+    /// </summary>
+    private void DrawServerPanel(DrawingContext g)
+    {
+        var lit = Lit;
+        var ghost = lit.With(20);
+        var srv = _c.Server;
+        var glass = R(40, 56, 920, 150);
+        g.FillRounded(Gradient(glass, Rgb(0x07, 0x0C, 0x0F), Rgb(0x02, 0x04, 0x05), 90), glass, 7);
+        g.DrawRounded(Pen(Rgb(0x22, 0x28, 0x2F), 1.5), glass, 7);
+
+        // the big line: what's happening
+        const int cells = 23;
+        string main = srv == null ? (_c.Error ?? "SERVER MODE") : srv.Client != null ? "SERVING" : "WAITING FOR A RADIO";
+        main = main.ToUpperInvariant();
+        if (main.Length > cells) main = main[..cells];
+        DotMatrix.Draw(g, DotMatrix.Columns(main), 0, 60, 70, 6.3, cells, srv == null && _c.Error != null ? Alert : lit, ghost);
+
+        // the small line: the name this dongle is advertised under, and the port
+        string sub = srv == null ? "" : $"{srv.ServiceName}   PORT {srv.Port}".ToUpperInvariant();
+        DotMatrix.Draw(g, DotMatrix.Columns(sub), 0, 60, 128, 3.1, 46, lit, ghost, glow: false);
+
+        // the lights and figures
+        double x = 60, y = 168;
+        bool bonjour = srv?.Advertised == true, serving = srv?.Client != null;
+        x = Indicator(g, x, y, "BONJOUR", bonjour, bonjour, lit) + 8;
+        x = Indicator(g, x, y, "CLIENT", serving, serving, lit) + 14;
+        if (srv != null)
+        {
+            string figures = serving
+                ? $"{srv.Client}     {srv.Frequency / 1e6:0.000} MHz     {srv.SampleRate / 1e6:0.00} MS/s     {srv.BytesPerSecond / 1e6:0.0} MB/s"
+                : $"{srv.TunerType} dongle: {srv.Device}";
+            g.Label(figures, 10, lit, R(x, y - 1, glass.Right - 16 - x, 16), Align.Near, bold: true);
+        }
+
+        // the keys: stop serving (back to a radio), and the usual color and window keys
+        TextKey(g, R(40, 218, 150, 36), "stopserver", "STOP SERVING", lit, () => _c.SetServerMode(false), lit: true);
+        TextKey(g, R(200, 218, 80, 36), "color", "COLOR", lit, CycleColor);
+        g.Label("The dongle in this computer is shared on the network (rtl_tcp). Pick it on the other radio: Source, or the Apple TV's SETUP › SERVER.",
+            9.5, Grey, R(300, 220, 650, 32), Align.Near);
     }
 
     /// <summary>The window's background with the faceplate open: chassis, screws, the panel's frame.</summary>
@@ -740,6 +786,7 @@ internal sealed class FaceplateControl : Control
         if (_flash != null && DateTime.UtcNow < _flashUntil) return _flash;
         _flash = null;
         if (_c.Starting) return "STARTING";
+        if (_c.ServerMode) return _c.Server == null ? (_c.Error ?? "SERVER MODE").ToUpperInvariant() : _c.Server.Client != null ? "SERVING" : "SERVER MODE";
         if (eng == null) return (_c.Error ?? "CLICK TO START").ToUpperInvariant();
         if (_c.Seeking) return $"SEEK  {mhz}";
         if (!string.IsNullOrEmpty(hd?.Alert)) { alert = true; return "ALERT  " + hd.Alert.ToUpperInvariant(); }
@@ -752,6 +799,8 @@ internal sealed class FaceplateControl : Control
 
     private string SubText(RadioEngine? eng, HdStatus? hd, RdsStatus? rds, bool synced, string mhz)
     {
+        if (_c.ServerMode && _c.Server is { } srv)
+            return srv.Client != null ? $"{srv.Client}  {srv.Frequency / 1e6:0.0} MHZ  {srv.BytesPerSecond / 1e6:0.0} MB/S" : $"{srv.ServiceName} :{srv.Port}  WAITING".ToUpperInvariant();
         if (eng == null) return $"FM {mhz}";
         var (_, top, bottom) = DisplayModes[Mode];
         return Item(bottom, eng, hd, rds, synced, mhz, Item(top, eng, hd, rds, synced, mhz, null)).ToUpperInvariant();
