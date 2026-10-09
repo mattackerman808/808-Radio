@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.0 (2026-10-09)
+
+- **Server mode: the Mac shares its dongle on the network.** No Raspberry Pi needed: right-click › *Server mode*
+  and 808 Radio stops playing and serves its USB dongle with the rtl_tcp protocol to another 808 Radio (or any
+  rtl_tcp client), advertised over Bonjour as `_rtl-tcp._tcp` like the Pi setup, so the radios list it. One client
+  at a time, the newest taking over; a slow or vanished client drops samples rather than wedging the dongle, which
+  stops between clients. The faceplate turns into a server panel (what's served to whom, STOP SERVING). macOS for
+  now; the Windows app doesn't have the menu item yet.
+- **808 Radio for Apple TV** (TestFlight). The faceplate on tvOS, on the same receiver, fed by a network dongle (a
+  Pi, or a Mac in server mode, found on the network under SETUP › SERVER, or typed in): dot-matrix display,
+  HD programs, signal meter, analyzer or album art, six presets, and keys the Siri Remote moves between. Plays to
+  the TV or to HomePods over AirPlay, with a MilkDrop-style screen saver driven by the audio after an idle time
+  set in SETUP. Wants Ethernet on the Apple TV.
+- Shared with the TV: the dot-matrix font and the display text rules moved to Radio808.Shared; the settings use
+  source-generated JSON; audio devices can report a restart so the player drops what queued up meanwhile; a
+  program type of "None" counts as no genre.
+
 ## 0.8.2 (2026-10-08)
 
 - **Automatic gain takes the top of a flat peak, not the bottom.** On a weak HD station the spectral score barely

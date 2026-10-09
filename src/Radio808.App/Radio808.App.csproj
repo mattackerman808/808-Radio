@@ -11,7 +11,7 @@
     <AssemblyName>808Radio</AssemblyName>
     <RootNamespace>Radio808.App</RootNamespace>
     <Product>808 Radio</Product>
-    <Version>0.8.2</Version>
+    <Version>0.9.0</Version>
     <Copyright>GPL-3.0-or-later</Copyright>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <!-- release builds: self-contained for win-x64 (no .NET install needed) -->

@@ -111,7 +111,8 @@ with `808Radio.log` and the map cache (`maps/`) in the same folder.
 - **Weather radar on a map**: the station's radar image over a street map of the same box, cached for use offline;
   the station's service guide says up front whether it sends maps. **HD-only seek** skips analog-only stations.
 - **Network dongle**: the RTL-SDR can be on a Raspberry Pi by the antenna, running `rtl_tcp`; 808 Radio finds it on
-  the network (mDNS) — see [docs/raspberry-pi.md](docs/raspberry-pi.md).
+  the network (mDNS) — see [docs/raspberry-pi.md](docs/raspberry-pi.md). Or a Mac can share its own dongle: right-click
+  → *Server mode*, and other radios (the Apple TV app among them) list it the same way.
 - **Smooth instrument panel**: on Windows, Direct2D on its own render thread, presented with the display (right-click
   → *Panel frame rate*), GDI+ if there's no GPU; on the Mac, Avalonia's Skia compositor.
 
