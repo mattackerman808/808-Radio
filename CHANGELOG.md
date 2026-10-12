@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.1 (2026-10-12)
 
 - **Low bit rate EQ for HD subchannels.** A station splits its ~96 kbit/s digital pipe among its programs, and a
   dance HD2 at 21 kbit/s (99.7 NOW) comes out thin and boxy. The decoder now measures every program's audio bit
