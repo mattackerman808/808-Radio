@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Low bit rate EQ for HD subchannels.** A station splits its ~96 kbit/s digital pipe among its programs, and a
+  dance HD2 at 21 kbit/s (99.7 NOW) comes out thin and boxy. The decoder now measures every program's audio bit
+  rate from its HDC packets (shown in the nerd panel next to each program) and the blender applies a tone
+  correction keyed off the rate: nothing at 48 kbit/s and up, the full curve at 24 and below. Mild on purpose:
+  a survey of Bay Area subchannels found the dead top octave and collapsed stereo everywhere, but the gutted bass
+  and midrange hump only on some stations. Right-click › *Low bit rate EQ* (Off / Auto / Strong) on the Mac;
+  SETUP › LOW BIT RATE EQ on the Apple TV (TestFlight build 3). Strong doubles the curve for stations like 99.7.
+- Tools: the offline HD decode prints the programs' bit rates, takes `R808_LOWRATE_EQ=off|auto|strong`, and
+  `R808_HD_WAV_FROM=<s>` drops the analog lead-in from the WAV it writes, for spectrum comparisons.
+
 ## 0.9.0 (2026-10-09)
 
 - **Server mode: the Mac shares its dongle on the network.** No Raspberry Pi needed: right-click › *Server mode*

@@ -146,6 +146,8 @@ public sealed class RadioEngine : IDisposable
     public bool ForceAnalog { get => _blender.ForceAnalog; set => _blender.ForceAnalog = value; }
     public bool Equalizer { get => _rx.Equalizer.Enabled; set => _rx.Equalizer.Enabled = value; }
     public bool ForceMono { get => _rx.Stereo.ForceMono; set => _rx.Stereo.ForceMono = value; }
+    /// <summary>Tone correction for low bit rate HD programs (subchannels): off, by measured bit rate, or stronger.</summary>
+    public LowRateEqMode LowRateEq { get => _blender.Eq.Mode; set => _blender.Eq.Mode = value; }
     public float Volume { get => _player.Volume; set => _player.Volume = Math.Clamp(value, 0, 1); }
     public bool Muted { get => _player.Muted; set => _player.Muted = value; }
     /// <summary>

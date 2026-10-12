@@ -1,3 +1,4 @@
+using Radio808.Core.Hd;
 using System;
 using System.Threading;
 using System.Collections.Generic;
@@ -110,6 +111,7 @@ public sealed class RadioController : IDisposable
             engine.ForceAnalog = Settings.ForceAnalog;
             engine.Equalizer = Settings.Equalizer;
             engine.ForceMono = Settings.ForceMono;
+            engine.LowRateEq = (LowRateEqMode)Settings.LowRateEq;
             engine.Program = Settings.Program;   // the HD program you were on (or a preset's, recalled while the radio was down)
             engine.DeviceStopped += msg => _ui.Post(_ => OnDeviceStopped(msg), null);
             try
@@ -395,6 +397,12 @@ public sealed class RadioController : IDisposable
     {
         Settings.ForceMono = on;
         if (Engine != null) Engine.ForceMono = on;
+    }
+
+    public void SetLowRateEq(LowRateEqMode mode)
+    {
+        Settings.LowRateEq = (int)mode;
+        if (Engine != null) Engine.LowRateEq = mode;
     }
 
     /// <summary>Fixed gain in dB, or null for automatic peaking.</summary>

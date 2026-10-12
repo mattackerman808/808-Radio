@@ -17,7 +17,7 @@
     <AssemblyName>808Radio</AssemblyName>
     <ApplicationTitle>808 Radio</ApplicationTitle>
     <ApplicationId>org.808.radio.tv</ApplicationId>
-    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationVersion>3</ApplicationVersion>
     <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">tvossimulator-arm64</RuntimeIdentifier>
     <TrimMode Condition="'$(Configuration)' == 'Release'">full</TrimMode>

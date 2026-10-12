@@ -1,3 +1,4 @@
+using Radio808.Core.Hd;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -27,6 +28,8 @@ public sealed class AppSettings
     public bool ForceAnalog { get; set; }
     public bool Equalizer { get; set; } = true;
     public bool ForceMono { get; set; }
+    /// <summary>Tone correction for low bit rate HD programs: 0 off, 1 auto (by measured bit rate), 2 strong.</summary>
+    public int LowRateEq { get; set; } = 1;
     /// <summary>Seek stops only at stations that sync HD.</summary>
     public bool SeekHd { get; set; }
     /// <summary>Peak the tuner gain automatically for each station (recommended).</summary>

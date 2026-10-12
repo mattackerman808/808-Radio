@@ -93,6 +93,9 @@ public sealed unsafe class HdBlender
     public volatile bool SwapHdChannels = true;
     /// <summary>Selected program; only HD1 (0) simulcasts the analog and can be aligned.</summary>
     public volatile int Program;
+    /// <summary>Tone correction for low bit rate programs, driven by the rates the decoder reports.</summary>
+    public readonly LowRateEq Eq = new();
+    private readonly double[] _kbps = new double[8];
 
     public bool PlayingHd => _mix > 0;
     public bool Aligned => !double.IsNaN(_align);
@@ -124,11 +127,13 @@ public sealed unsafe class HdBlender
             if (double.IsNaN(_t0)) _t0 = _now;
             double pow = 0;
             int li = SwapHdChannels ? 1 : 0, ri = 1 - li;
+            Eq.Update();
             for (int i = 0; i < frames; i++)
             {
                 long abs = _written + i;
                 int w = (int)(abs % Capacity);
                 float l = bad ? 0 : samples[2 * i + li] / 32768f, r = bad ? 0 : samples[2 * i + ri] / 32768f;
+                if (!bad) Eq.Apply(ref l, ref r);   // before the loudness tracking, so the gain match sees the corrected audio
                 _fifo[2 * w] = l;
                 _fifo[2 * w + 1] = r;
                 pow += l * l + r * r;
@@ -159,12 +164,25 @@ public sealed unsafe class HdBlender
         }
     }
 
+    /// <summary>A program's measured audio bit rate (kbit/s), from the decoder; sets the EQ when it's the one playing.</summary>
+    public void SetBitrate(int program, double kbps)
+    {
+        lock (_lock)
+        {
+            if (program >= 0 && program < _kbps.Length) _kbps[program] = kbps;
+            if (program == Program) Eq.Kbps = kbps;
+        }
+    }
+
     /// <summary>New station: forget the HD timeline and alignment, back to analog.</summary>
     public void Clear()
     {
         lock (_lock)
         {
             ResetTimeline();
+            Array.Clear(_kbps);
+            Eq.Kbps = 0;
+            Eq.Reset();
             _hdOn = false;
             _mix = 0;
             _requiredGood = 0.5;
@@ -197,6 +215,8 @@ public sealed unsafe class HdBlender
                 _gaps.Add((Math.Max(0, _written - Capacity), _written - 1));
             }
             Array.Fill(_hEnv, float.NaN);   // the old program's loudness means nothing for the new one's alignment
+            Eq.Kbps = program >= 0 && program < _kbps.Length ? _kbps[program] : 0;
+            Eq.Reset();
             _hAcc = 0; _hCnt = 0; _hBad = false;
             _hdOn = false;   // fades out over the old audio, still buffered
             if (playing) _requiredGood = 0;

@@ -23,6 +23,8 @@ internal static class HdTools
         var data = File.ReadAllBytes(inPath);
         var rx = new FmReceiver();
         var blender = new HdBlender(FmReceiver.AudioRate);
+        // R808_LOWRATE_EQ=off|auto|strong (default off here, so measurements see the raw decode)
+        blender.Eq.Mode = Enum.TryParse<LowRateEqMode>(Environment.GetEnvironmentVariable("R808_LOWRATE_EQ"), true, out var eqMode) ? eqMode : LowRateEqMode.Off;
         using var hd = new HdDecoder(blender);
         rx.Baseband += (i, q) => hd.Enqueue(i, q);
 
@@ -35,6 +37,7 @@ internal static class HdTools
         var sums = new double[4, 3];   // pairs (aL,hL) (aL,hR) (aR,hR) (aR,hL): sum xy, xx, yy (mean-removed later)
         var sx = new double[4]; var sy = new double[4]; int pairs = 0;
         int bucketLen = (int)(FmReceiver.AudioRate / 200);
+        long written = 0, wavFrom = (long)(double.Parse(Environment.GetEnvironmentVariable("R808_HD_WAV_FROM") ?? "0", CultureInfo.InvariantCulture) * FmReceiver.AudioRate);
         rx.Audio += a =>
         {
             if (analog.Length < a.Length) analog = new float[a.Length];
@@ -59,7 +62,8 @@ internal static class HdTools
                 accAL = accAR = accHL = accHR = 0; bucket = 0;
             }
             int n = rs.Process(a, tmp);
-            wav.WriteSamples(tmp, 0, 2 * n);
+            if (written >= wavFrom) wav.WriteSamples(tmp, 0, 2 * n);   // R808_HD_WAV_FROM=<s>: skip the analog lead-in
+            written += a.Length / 2;
         };
 
         hd.Start();
@@ -88,7 +92,8 @@ internal static class HdTools
             {
                 var s = hd.Status;
                 Console.WriteLine($"{t,5:F1}s  {(s.Synced ? "SYNC" : "----")} MER {s.MerLower,4:F1}/{s.MerUpper,4:F1}  " +
-                    $"{(blender.PlayingHd ? "HD    " : "analog")}  lead {blender.HdLeadSeconds,6:F3} s  score {blender.AlignScore:F2}  gain {blender.HdGain:F2}  {s.StationName} {s.Title} - {s.Artist}");
+                    $"{(blender.PlayingHd ? "HD    " : "analog")}  lead {blender.HdLeadSeconds,6:F3} s  score {blender.AlignScore:F2}  gain {blender.HdGain:F2}  " +
+                    $"[{string.Join(" ", s.Bitrates.Select(kv => $"HD{kv.Key + 1} {kv.Value:F0}k"))}]  {s.StationName} {s.Title} - {s.Artist}");
                 nextReport += 1;
             }
         }

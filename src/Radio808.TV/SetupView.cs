@@ -37,6 +37,7 @@ public sealed class SetupView : UIView
         Row("HD RADIO", () => s.ForceAnalog ? "ANALOG ONLY" : "AUTO HD", () => _c.SetForceAnalog(!s.ForceAnalog));
         Row("MULTIPATH EQUALIZER", () => s.Equalizer ? "ON" : "OFF", () => _c.SetEqualizer(!s.Equalizer));
         Row("STEREO", () => s.ForceMono ? "FORCED MONO" : "AUTO", () => _c.SetForceMono(!s.ForceMono));
+        Row("LOW BIT RATE EQ", () => s.LowRateEq switch { 0 => "OFF", 2 => "STRONG", _ => "AUTO  (BY HD BIT RATE)" }, () => StepEq(+1), StepEq);
         Row("SEEK", () => s.SeekHd ? "HD STATIONS ONLY" : "ALL STATIONS", () => _c.SetSeekHd(!s.SeekHd));
         Row("TUNER GAIN", () => s.AutoGain ? $"AUTO  ({_c.Engine?.CurrentGainDb ?? 0:0.0} dB)" : $"FIXED  {s.GainDb:0.0} dB",
             () => _c.SetGain(s.AutoGain ? s.GainDb ?? Gains[2] : null), d => StepGain(d));
@@ -60,6 +61,14 @@ public sealed class SetupView : UIView
         int i = s.AutoGain ? -1 : Array.FindIndex(Gains, g => Math.Abs(g - (s.GainDb ?? 0)) < 0.05);
         i = Math.Clamp(i + d, -1, Gains.Length - 1);
         _c.SetGain(i < 0 ? null : Gains[i]);
+    }
+
+    /// <summary>Tone correction for starved HD subchannels: off, by the measured bit rate, or stronger.</summary>
+    private void StepEq(int d)
+    {
+        var s = _c.Settings;
+        _c.SetLowRateEq((Radio808.Core.Hd.LowRateEqMode)(((s.LowRateEq + d) % 3 + 3) % 3));
+        s.Save();
     }
 
     private void StepSaver(int d)

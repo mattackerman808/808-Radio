@@ -29,6 +29,7 @@ internal static unsafe class Nrsc5Native
     public const uint EventLostSync = 3;
     public const uint EventMer = 4;
     public const uint EventBer = 5;
+    public const uint EventHdc = 6;
     public const uint EventAudio = 7;
     public const uint EventId3 = 8;
     public const uint EventSig = 9;

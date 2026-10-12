@@ -39,6 +39,8 @@ public sealed class HdStatus
     public string?[] TrafficNames = new string?[9];
     /// <summary>Audio programs seen (0 = HD1), with their program type name.</summary>
     public SortedDictionary<uint, string?> Programs = new();
+    /// <summary>Each program's audio bit rate in kbit/s, measured from its HDC packets over the last couple of seconds.</summary>
+    public SortedDictionary<uint, double> Bitrates = new();
     public DateTime LastAudio = DateTime.MinValue;
     public int FilesReceived;
     public string? LastFile, Error;
@@ -47,6 +49,7 @@ public sealed class HdStatus
     {
         var c = (HdStatus)MemberwiseClone();
         c.Programs = new SortedDictionary<uint, string?>(Programs);
+        c.Bitrates = new SortedDictionary<uint, double>(Bitrates);
         return c;
     }
 }
@@ -72,6 +75,7 @@ public sealed unsafe class HdDecoder : IDisposable
     private readonly object _lock = new();
     private readonly Dictionary<uint, byte[]> _lotImages = new();
     private readonly ConcurrentDictionary<uint, byte[]> _programArt = new(), _programLogo = new();
+    private readonly Dictionary<uint, (long Bytes, int Packets)> _hdcWindow = new();   // worker thread only
 
     private Thread? _thread;
     private volatile bool _running;
@@ -230,6 +234,7 @@ public sealed unsafe class HdDecoder : IDisposable
         _lotImages.Clear();
         _programArt.Clear();
         _programLogo.Clear();
+        _hdcWindow.Clear();
         _pendingArtLot = -1;
         // the program is not reset here: a retune sets HD1 on the UI thread (RadioEngine.Frequency), before the
         // session restarts on this thread, so a program chosen right after a tune (a preset's HD2) isn't undone
@@ -288,6 +293,9 @@ public sealed unsafe class HdDecoder : IDisposable
                     }
                     Update(s => { s.Ber = ber; s.BerAvg = med; });
                     break;
+                case Nrsc5Native.EventHdc:
+                    OnHdc(e);
+                    break;
                 case Nrsc5Native.EventAudio:
                     OnAudio(e);
                     break;
@@ -330,6 +338,26 @@ public sealed unsafe class HdDecoder : IDisposable
         {
             // Never let an exception unwind into native code.
         }
+    }
+
+    /// <summary>
+    /// A compressed audio packet (every program's, not just the selected one): its size gives the program's bit rate.
+    /// A packet carries 2048 samples at 44.1 kHz; the rate is averaged over 32 packets, about a second and a half.
+    /// </summary>
+    private void OnHdc(IntPtr e)
+    {
+        uint program = Nrsc5Native.U32(e, 8);
+        long count = Nrsc5Native.Size(e, 24);
+        _hdcWindow.TryGetValue(program, out var w);
+        w = (w.Bytes + count, w.Packets + 1);
+        if (w.Packets >= 32)
+        {
+            double kbps = w.Bytes * 8.0 * Nrsc5Native.AudioSampleRate / 2048 / w.Packets / 1000;
+            Update(s => s.Bitrates[program] = kbps);
+            _blender.SetBitrate((int)program, kbps);
+            w = default;
+        }
+        _hdcWindow[program] = w;
     }
 
     private void OnAudio(IntPtr e)
