@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
 using Radio808.Core.Dsp;
+using Radio808.Core.Hd;
 using Radio808.Core.Radio;
 using Radio808.Shared;
 
@@ -629,7 +630,9 @@ internal sealed class NerdPanel : IDisposable
             string sync = !hd.Synced ? "no" : eng.HdTooWeak ? "weak" : "yes";
             L("Sync", !hd.Synced ? "no" : hd.MerLower <= 0 && hd.MerUpper <= 0 ? $"{sync}  MER measuring…" : $"{sync}  MER {hd.MerLower:0.0} / {hd.MerUpper:0.0} dB");
             L("BER", hd.Synced ? $"{hd.Ber:0.00000}" : "—");
-            L("Programs", hd.Programs.Count == 0 ? "—" : string.Join(" ", hd.Programs.Select(kv => $"HD{kv.Key + 1}{(kv.Key == eng.Program ? "*" : "")}")));
+            L("Programs", hd.Programs.Count == 0 ? "—" : string.Join("  ", hd.Programs.Select(kv =>
+                $"HD{kv.Key + 1}{(kv.Key == eng.Program ? "*" : "")}{(hd.Bitrates.TryGetValue(kv.Key, out var kb) ? $" {kb:0}k" : "")}")));
+            L("Low-rate EQ", eng.LowRateEq == LowRateEqMode.Off ? "off" : b.Eq.Strength < 0.01 ? $"{eng.LowRateEq.ToString().ToLowerInvariant()} · flat" : $"{eng.LowRateEq.ToString().ToLowerInvariant()} · strength {b.Eq.Strength:0.00}");
             L("Blend", eng.HdTooWeak ? "analog · HD too weak to play"
                 : (b.PlayingHd ? "HD" : "analog") + (b.Aligned ? $"  lead {b.HdLeadSeconds:0.000} s  score {b.AlignScore:0.00}" : "  not aligned"));
             L("Loudness", $"HD gain {b.HdGain:0.00}" + (b.RetryIn > 0.5 ? $"  retry in {b.RetryIn:0} s" : ""));
