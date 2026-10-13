@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
+using Radio808.Core.Hd;
 using Radio808.Shared;
 
 namespace Radio808.App;
@@ -357,6 +358,10 @@ internal sealed class MainForm : Form
         m.Items.Add(new ToolStripMenuItem("Auto HD", null, (_, _) => _c.SetForceAnalog(!_c.Settings.ForceAnalog)) { Checked = !_c.Settings.ForceAnalog });
         m.Items.Add(new ToolStripMenuItem("Multipath equalizer", null, (_, _) => _c.SetEqualizer(!_c.Settings.Equalizer)) { Checked = _c.Settings.Equalizer });
         m.Items.Add(new ToolStripMenuItem("Force mono", null, (_, _) => _c.SetForceMono(!_c.Settings.ForceMono)) { Checked = _c.Settings.ForceMono });
+        var eq = new ToolStripMenuItem("Low bit rate EQ (HD subchannels)");
+        foreach (var (name, mode) in new[] { ("Off", LowRateEqMode.Off), ("Auto (by measured bit rate)", LowRateEqMode.Auto), ("Strong", LowRateEqMode.Strong) })
+            eq.DropDownItems.Add(new ToolStripMenuItem(name, null, (_, _) => _c.SetLowRateEq(mode)) { Checked = _c.Settings.LowRateEq == (int)mode });
+        m.Items.Add(eq);
         m.Items.Add(new ToolStripMenuItem("Seek HD stations only", null, (_, _) => _c.SetSeekHd(!_c.Settings.SeekHd)) { Checked = _c.Settings.SeekHd });
         var gain = new ToolStripMenuItem("Tuner gain");
         gain.DropDownItems.Add(new ToolStripMenuItem("Automatic (peak each station)", null, (_, _) => _c.SetGain(null)) { Checked = _c.Settings.AutoGain });
