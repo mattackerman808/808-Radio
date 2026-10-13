@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.2 (2026-10-13)
+
+- **Low bit rate EQ on Windows.** The right-click menu gets *Low bit rate EQ* (Off / Auto / Strong) like the Mac;
+  0.9.1 ran it on Auto on Windows with no way to change it.
+
 ## 0.9.1 (2026-10-12)
 
 - **Low bit rate EQ for HD subchannels.** A station splits its ~96 kbit/s digital pipe among its programs, and a
